@@ -11,11 +11,12 @@ public:
   void toggleDir();
   void setDir(bool newDir);
 
-  // Allows +/- inputs
+  // Expects +/- PWM inputs, for open-loop control
   void drive(int target);
 
-  float updateVelocity();
-  float rpmControl(float target);
+  // Expects +/- RPM inputs, for closed-loop PID control, returns velocity reading
+  float feedbackStep(float ref);
+
   void readEncoder();
   void tunePID(float kp, float ki, float kd);
 
@@ -35,7 +36,7 @@ private:
   long prevT;
   int posPrev;
 
-  // Voltaile Measurements
+  // Volatile Measurements
   volatile int pos_i;
   volatile float velocity_i;
   volatile long prevT_i;
@@ -44,7 +45,10 @@ private:
   float lowPassFilter(float calc, float prevCalc, float prevFilt);
   float v1Filt, v1Prev, v2Filt, v2Prev;
 
-  // PI Controller
+  // PID Controller
+  float updateVelocity(); // Returns velocity, can be changed to v1/v2
+  float pidController(float ref); // Calculates PID control effort
+
   float eintegral, prevE;
   float kp, ki, kd;
 };

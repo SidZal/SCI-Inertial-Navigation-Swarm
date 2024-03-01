@@ -91,14 +91,21 @@ float Motor::updateVelocity() {
   return v2Filt;
 }
 
-float Motor::rpmControl(float target) {
-  float e = target - v2Filt;
+float Motor::pidController(float ref) {
+  float e = ref - v2Filt;
 
   eintegral = eintegral + e*deltaT;
   float ederivative = (e - prevE)/deltaT;
   prevE = e;
   
   return kp*e + ki*eintegral + kd*ederivative;
+}
+
+float Motor::feedbackStep(float ref) {
+  float velocity = this->updateVelocity();
+  float plantInput = this->pidController(ref);
+  this->drive(plantInput);
+  return velocity;
 }
 
 void Motor::tunePID(float kp, float ki, float kd) {

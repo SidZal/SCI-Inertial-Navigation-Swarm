@@ -1,10 +1,15 @@
 #include "Motor.h"
+#include "rk4.h"
+#include "dualWheelModel.h"
+#include "utility.h"
 #include <ArduinoBLE.h>
 
 // Bluetooth UUIDs
 #define PERIPHERAL_UUID "b440"
 #define PWM_UUID "ba89"
 #define IDLE_UUID "14df"
+
+#define MAX_RPM 255
 
 // Bluetooth Helper Variables
 bool scanning = false;
@@ -13,21 +18,52 @@ BLEDevice peripheral;
 BLECharacteristic pwm;
 BLECharacteristic idle;
 
-#define enA 11
-#define in1 10
-#define in2 12
-
-#define enB 6
-#define in3 7
-#define in4 8
-
-Motor motorA(in1, in2, enA, 2, 4, 0);
-Motor motorB(in3, in4, enB, 3, 5, 0);
-
+// Joystick Idle Values
 int idleVal[2];
+
+// Motor + Encoder Pins
+#define PWMA 6
+#define in1 8
+#define in2 7
+#define C1A 3
+#define C2A 5
+
+#define MOTOR_STANDBY 9
+
+#define PWMB 11
+#define in3 10
+#define in4 12
+#define C1B 2
+#define C2B 4
+
+// Low-Level Speed Control Parameters
+const float CPR = 12;
+const float gearRatio = 100.37;
+const float conversionRatio = 4./CPR*60/gearRatio;
+Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
+Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
+
+// Orientation Controller Variables
+int n = 3; // State Variables
+double dt = 0.1, t0 = 0, t1;
+double* X1;
+double X0[3];
+double wL = 0, wR = 0;
+double kp = 5;
+double wMax = 100, wComm;
+double error;
+unsigned long millisLast = 0;
 
 void setup() {
   Serial.begin(9600);
+  X0[0] = X0[1] = X0[2] = 0.0;
+  attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
+  attachInterrupt(digitalPinToInterrupt(C1B), motorBInterrupt, RISING);
+
+  digitalWrite(MOTOR_STANDBY, HIGH);
+
+  motorA.tunePID(1, 4, 0);
+  motorB.tunePID(1, 4, 0);
 
   Serial.println("Initializing BLE");
   if(!BLE.begin()) {
@@ -82,14 +118,37 @@ void loop() {
 }
 
 void transmissionLoop() {
+  millisLast = millis() - millisLast;
   int inps[2];
   pwm.readValue(&inps, 8);
-  float straight = (inps[0]-idleVal[0])/513.*255;
-  float turn = (inps[1]-idleVal[1])/513.*255;
 
-  motorA.drive(straight + turn);
-  motorB.drive(straight - turn);
-  Serial.println(String(inps[0]) + ' ' + String(inps[1]));
+  float jsA = (inps[0]-idleVal[0])/513.;
+  float jsB = (inps[1]-idleVal[1])/513.;
+  double theta_d = atan2(jsA, jsB);
+
+  wComm = speedSaturator(kp*error, wMax);
+  wL = -wComm;
+  wR = wComm;
+
+  t1 = t0 + millisLast/1000;
+  X1 = rk4(t0, n, X0, millisLast/1000, wL, wR, dualWheelModel);
+  t0 = t1;
+  for(int i=0; i<n; i++)
+    X0[i] = X1[i];
+
+  float Aref = jsA + jsB;
+  if(abs(Aref)>1)
+    Aref /= abs(Aref);
+  float Bref = jsA - jsB;
+  if(abs(Bref)>1)
+    Bref /= abs(Bref);
+
+  float v[2];
+  v[0] = motorA.feedbackStep(Aref*MAX_RPM);
+  v[1] = motorB.feedbackStep(Bref*MAX_RPM);
+  //Serial.println(String(X0[0]) + ' ' + String(X0[1]) + ' ' + String(X0[2]) + ' ' + String(wL) + ' ' + String(wR));
+  Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(Aref*MAX_RPM) + ' ' + String(Bref *MAX_RPM));
+  delay(50);
 }
 
 // Function to verify BLE Characteristics
@@ -104,4 +163,12 @@ void verifyCharacteristic(BLECharacteristic *characteristic, char* UUID) {
     peripheral.disconnect();
     return;
   }
+}
+
+// Motor Interrupts from Encoders
+void motorAInterrupt() {
+  motorA.readEncoder();
+}
+void motorBInterrupt() {
+  motorB.readEncoder();
 }
