@@ -71,6 +71,6 @@ void receiverLoop() {
   int jsIn[2];
   jsIn[0] = jsA.read();
   jsIn[1] = jsB.read();
-  Serial.println(String(jsIn[0]) + ' ' + String(jsIn[1]));
+  //Serial.println(String(jsIn[0]) + ' ' + String(jsIn[1]));
   pwm.writeValue(&jsIn, 8);
 }

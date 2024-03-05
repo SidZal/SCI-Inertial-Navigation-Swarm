@@ -45,9 +45,8 @@ Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 
 // Orientation Controller Variables
 int n = 3; // State Variables
-double dt = 0.1, t0 = 0, t1;
-double* X1;
-double X0[3];
+double t0 = 0, t1;
+double X0[3], X1[3];
 double wL = 0, wR = 0;
 double kp = 5;
 double wMax = 100, wComm;
@@ -76,6 +75,10 @@ void setup() {
 void loop() {
   if(peripheral.connected()) {
     transmissionLoop();
+  }
+  else if (peripheral) {
+    Serial.println("Disconnected from Peripheral: " + peripheral.localName());
+    peripheral = BLE.available();
   }
   else {
 
@@ -113,12 +116,15 @@ void loop() {
         Serial.println("Waiting for idle");
         idle.readValue(&idleVal, 8);
       }
+
+      millisLast = millis();
     }
   }
 }
 
 void transmissionLoop() {
   millisLast = millis() - millisLast;
+  double dt = millisLast/1000;
   int inps[2];
   pwm.readValue(&inps, 8);
 
@@ -126,12 +132,13 @@ void transmissionLoop() {
   float jsB = (inps[1]-idleVal[1])/513.;
   double theta_d = atan2(jsA, jsB);
 
+  error = theta_d - X0[2];
   wComm = speedSaturator(kp*error, wMax);
   wL = -wComm;
   wR = wComm;
 
-  t1 = t0 + millisLast/1000;
-  X1 = rk4(t0, n, X0, millisLast/1000, wL, wR, dualWheelModel);
+  t1 = t0 + dt;
+  rk4(t0, n, X0, X1, dt, wL, wR, dualWheelModel);
   t0 = t1;
   for(int i=0; i<n; i++)
     X0[i] = X1[i];
@@ -144,10 +151,10 @@ void transmissionLoop() {
     Bref /= abs(Bref);
 
   float v[2];
-  v[0] = motorA.feedbackStep(Aref*MAX_RPM);
-  v[1] = motorB.feedbackStep(Bref*MAX_RPM);
-  //Serial.println(String(X0[0]) + ' ' + String(X0[1]) + ' ' + String(X0[2]) + ' ' + String(wL) + ' ' + String(wR));
-  Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(Aref*MAX_RPM) + ' ' + String(Bref *MAX_RPM));
+  v[0] = motorA.feedbackStep(wL);
+  v[1] = motorB.feedbackStep(wR);
+  Serial.println(String(theta_d) + ' ' + String(X1[0]) + ' ' + String(X1[1]) + ' ' + String(X1[2]) + ' ' + String(wL) + ' ' + String(wR));
+  //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(Aref*MAX_RPM) + ' ' + String(Bref *MAX_RPM));
   delay(50);
 }
 

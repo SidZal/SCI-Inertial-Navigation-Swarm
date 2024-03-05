@@ -4,6 +4,6 @@
 #include <iostream>
 using namespace std;
 
-double* dualWheelModel(double t, int n, double X[], double omegaLeft, double omegaRight);
+void dualWheelModel(double t, int n, double X[], double Xprime[], double omegaLeft, double omegaRight);
 
 #endif
