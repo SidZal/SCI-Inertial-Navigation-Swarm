@@ -9,7 +9,7 @@
 #define PWM_UUID "ba89"
 #define IDLE_UUID "14df"
 
-#define MAX_RPM 255
+#define MAX_RPM 25
 
 // Bluetooth Helper Variables
 bool scanning = false;
@@ -36,6 +36,8 @@ int idleVal[2];
 #define C1B 2
 #define C2B 4
 
+#define pi 3.1415926
+
 // Low-Level Speed Control Parameters
 const float CPR = 12;
 const float gearRatio = 100.37;
@@ -43,15 +45,18 @@ const float conversionRatio = 4./CPR*60/gearRatio;
 Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
 Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 
+float v[2];
+
 // Orientation Controller Variables
 int n = 3; // State Variables
 double t0 = 0, t1;
 double X0[3], X1[3];
 double wL = 0, wR = 0;
-double kp = 5;
-double wMax = 100, wComm;
+double kp = .05;
+double wMax = 10, wComm, wInput;
 double error;
 unsigned long millisLast = 0;
+double theta_d=0;
 
 void setup() {
   Serial.begin(9600);
@@ -123,22 +128,29 @@ void loop() {
 }
 
 void transmissionLoop() {
-  millisLast = millis() - millisLast;
-  double dt = millisLast/1000;
+  double dt = (millis() - millisLast)/1000.0;
+  if(dt < 0.1)
+    return;
+  millisLast = millis();
+
   int inps[2];
   pwm.readValue(&inps, 8);
 
   float jsA = (inps[0]-idleVal[0])/513.;
   float jsB = (inps[1]-idleVal[1])/513.;
-  double theta_d = atan2(jsA, jsB);
 
-  error = theta_d - X0[2];
+  if(pow(jsA,2) + pow(jsB,2) > 0.8) 
+    theta_d = -atan2(jsA, jsB)*180/pi;
+
+  error = theta_d - X0[2]*180/pi;
   wComm = speedSaturator(kp*error, wMax);
-  wL = -wComm;
-  wR = wComm;
-
+  wInput = -wComm * 60 / (2*pi);
+  
   t1 = t0 + dt;
-  rk4(t0, n, X0, X1, dt, wL, wR, dualWheelModel);
+  
+  rk4(t0, n, X0, X1, dt, v[0]*2*pi/60, v[1]*2*pi/60, dualWheelModel);
+  //rk4(t0, n, X0, X1, dt, -wComm, wComm, dualWheelModel);
+
   t0 = t1;
   for(int i=0; i<n; i++)
     X0[i] = X1[i];
@@ -150,12 +162,11 @@ void transmissionLoop() {
   if(abs(Bref)>1)
     Bref /= abs(Bref);
 
-  float v[2];
-  v[0] = motorA.feedbackStep(wL);
-  v[1] = motorB.feedbackStep(wR);
-  Serial.println(String(theta_d) + ' ' + String(X1[0]) + ' ' + String(X1[1]) + ' ' + String(X1[2]) + ' ' + String(wL) + ' ' + String(wR));
+  v[0] = motorA.feedbackStep(wInput);
+  v[1] = -motorB.feedbackStep(wInput);
+  Serial.println(String(dt) + ' ' + String(theta_d) + ' '  + String(error) + ' ' + String(X1[2]*180/pi) + ' ' + String(wInput) + ' ' + String(v[0]) + ' ' + String(v[1]));
   //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(Aref*MAX_RPM) + ' ' + String(Bref *MAX_RPM));
-  delay(50);
+  //delay(50);
 }
 
 // Function to verify BLE Characteristics
