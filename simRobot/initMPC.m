@@ -1,24 +1,28 @@
 
 import casadi.*
 
+% Control input constranits
 wL_max = w_max;
 wL_min = -w_max;
 wR_max = w_max;
 wR_min = -w_max;
 
-
+% State varaibles
 x = SX.sym('x');
 y = SX.sym('y');
 theta = SX.sym('theta');
 
 states = [x;y;theta];
 n_states = length(states);
+
+% Control variables
 wL = SX.sym('wL');
 wR = SX.sym('wR');
 
 controls = [wL;wR];
-
 n_controls = length(controls);
+
+% Dynamics
 rhs = [r/2*(wL+wR)*cos(theta);
        r/2*(wL+wR)*sin(theta);
        r/d*(wR-wL)];
@@ -38,7 +42,8 @@ for k = 1:N
     X(:,k+1) = st_new;
 end
 
-obj = 0; % Objective function
+% Objective function
+obj = 0; 
 
 Q = diag([1,1,0.1]);
 R = diag([0,0]);
