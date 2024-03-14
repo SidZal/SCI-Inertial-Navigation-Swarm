@@ -47,8 +47,8 @@ classdef dualWheelRobot
         
         function [wL,wR] = positionController(obj,q_desired,q_k)
             
-            k_theta = 20;
-            k_v = 5;
+            k_theta = 2;
+            k_v = .3;
 
             x_k = q_k(1);
             y_k = q_k(2);

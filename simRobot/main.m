@@ -25,10 +25,10 @@ robot2 = dualWheelRobot(simParams,2,colpos(2,:));
 robot3 = dualWheelRobot(simParams,3,colpos(3,:));
 robot4 = dualWheelRobot(simParams,4,colpos(4,:));
 
-robot1_IC = robot1.randomIC;
-robot2_IC = robot2.randomIC;
-robot3_IC = robot3.randomIC;
-robot4_IC = robot4.randomIC;
+robot1_IC = [0,0,0];%robot1.randomIC;
+robot2_IC = [-10,10,0];%robot2.randomIC;
+robot3_IC = [0,0,0];%robot3.randomIC;
+robot4_IC = [-10,10,0];%robot4.randomIC;
 
 robot1_q = zeros(length(time),3);
 robot1_q(1,:) = robot1_IC;
@@ -52,12 +52,13 @@ q_d = [x_d; y_d; theta_d]';
 figure(2)
 
 for i = 2:length(time)
-    [robot1_wL_k,robot1_wR_k] = robot1.MPCController(args, solver, N, q_d(i,:),robot1_q(i-1,:));
-    [robot2_wL_k,robot2_wR_k] = robot2.MPCController(args, solver, N, q_d(i,:),robot2_q(i-1,:));
+    figure(2)
+    [robot1_wL_k,robot1_wR_k] = robot1.positionController(q_d(i,:),robot1_q(i-1,:));
+    [robot2_wL_k,robot2_wR_k] = robot2.positionController(q_d(i,:),robot2_q(i-1,:));
     [robot3_wL_k,robot3_wR_k] = robot3.MPCController(args, solver, N, q_d(i,:),robot3_q(i-1,:));
     [robot4_wL_k,robot4_wR_k] = robot4.MPCController(args, solver, N, q_d(i,:),robot4_q(i-1,:));
 
-    plot(q_d(:,1),q_d(:,2),'k');
+    plot(q_d(:,1),q_d(:,2),'k',q_d(i,1),q_d(i,2),'o');
     hold on
 
     robot1_q(i,:) = robot1.discreteModel(robot1_q(i-1,:),robot1_wL_k,robot1_wR_k);
@@ -74,13 +75,24 @@ for i = 2:length(time)
 
     plot([0 0], [-10 10], 'k--')
     plot([-10 10], [0 0], 'k--')
-
+    
     box on
     drawnow
     hold off
+
+    
     % exportgraphics(gcf,'testAnimated.gif','Append',true);
 end
 
+figure(3)
+axis([0 time(length(time)) 0 5])
+robot1.plotDistToRef(time, i, robot1_q, q_d)
+robot2.plotDistToRef(time, i, robot2_q, q_d)
+robot3.plotDistToRef(time, i, robot3_q, q_d)
+robot4.plotDistToRef(time, i, robot4_q, q_d)
+axis([0 time(length(time)) 0 5])
+legend
+hold off
 % %% Heading control demo
 % theta_d = sin(time)*0+pi;
 % 

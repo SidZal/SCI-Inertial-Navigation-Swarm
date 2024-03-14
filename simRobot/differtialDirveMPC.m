@@ -57,6 +57,7 @@ end
 ff = Function('ff', {U,P}, {X});
 
 obj = 0; % Objective function
+g = []; % Constraints Vector
 
 Q = diag([1,1,0.5]);
 R = diag([0.,0.]);
