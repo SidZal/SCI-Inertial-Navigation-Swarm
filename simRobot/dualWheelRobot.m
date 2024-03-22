@@ -45,10 +45,10 @@ classdef dualWheelRobot
             wR = kp*error;
         end
         
-        function [wL,wR] = positionController(obj,q_desired,q_k)
+        function [wL,wR] = positionController(obj,q_desired,q_k,k_v)
             
             k_theta = 20;
-            k_v = 5;
+            %k_v = 5;
 
             x_k = q_k(1);
             y_k = q_k(2);
