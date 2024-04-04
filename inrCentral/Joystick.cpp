@@ -5,7 +5,7 @@ Joystick::Joystick(int pin, int max) {
   this->pin = pin;
   pinMode(pin, INPUT);
 
-  this->idle = 513;
+  this->idle = 512;
   this->tally = 0;
   this->max = max;
   this->rate = .05;
@@ -24,12 +24,16 @@ int Joystick::calibrate(int reps) {
   return idle = sum/reps;
 }
 
-int Joystick::read() {
+int Joystick::readRaw() {
   return analogRead(pin);
 }
 
+float Joystick::read() {
+  return (analogRead(pin) - idle)/513.;
+}
+
 float Joystick::total() {
-  float val = rate*this->read();
+  float val = rate*this->readRaw();
   if(abs(val) > rate*.1) {
     tally += val;
     if(abs(tally) > max)

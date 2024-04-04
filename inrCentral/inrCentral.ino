@@ -1,16 +1,17 @@
 #include <ArduinoBLE.h>
 #include "Joystick.h"
 
+#define MAX_RPM 255
+
 // Bluetooth Objects
 BLEService inrStation("b440");
-BLECharacteristic pwm("ba89", BLEWrite | BLERead, 8);
-BLECharacteristic idle("14df", BLEWrite | BLERead | BLENotify | BLEIndicate, 8);
+BLECharacteristic omega("ba89", BLERead, 8);
+BLECharacteristic inertialData("14df", BLEWrite | BLENotify, 16);
 BLEDevice central;
 
 // Joystick Objects
 Joystick jsA(A0);
 Joystick jsB(A1);
-int idleVal[2];
 
 void setup() {
   Serial.begin(9600);
@@ -19,8 +20,6 @@ void setup() {
   // Calibrate Joysticks
   Serial.println(jsA.calibrate());
   Serial.println(jsB.calibrate());
-  idleVal[0] = jsA.getIdle();
-  idleVal[1] = jsB.getIdle();
   delay(500);
 
   jsA.setMax(255);
@@ -37,8 +36,8 @@ void setup() {
   BLE.setLocalName("receiver");
   BLE.setAdvertisedService(inrStation);
 
-  inrStation.addCharacteristic(pwm);
-  inrStation.addCharacteristic(idle);
+  inrStation.addCharacteristic(omega);
+  inrStation.addCharacteristic(inertialData);
 
   BLE.addService(inrStation);
   BLE.advertise();
@@ -62,16 +61,31 @@ void loop() {
     while(!central.connected())
       central = BLE.central();
     Serial.println("Connected to Central: " + central.address());
-    idle.writeValue(&idleVal, 8);
   }
 }
 
 void receiverLoop() {
+  // Read quats
+  float quats[4];
+  inertialData.readValue(&quats, 16);
+  Serial.println(String(quats[0]) + ' ' + String(quats[1]) + ' ' + String(quats[2]) + ' ' + String(quats[3]));
+
   // Write Joystick Inputs
-  int jsIn[2];
-  jsIn[0] = jsA.read();
-  jsIn[1] = jsB.read();
-  //
-  Serial.println(String(jsIn[0]) + ' ' + String(jsIn[1]));
-  pwm.writeValue(&jsIn, 8);
+  float Ain = jsA.read();
+  float Bin = jsB.read();
+
+  // omega factor: -1 to 1
+  float wf_L = Ain + Bin;  
+  float wf_R = Ain - Bin;
+  if(abs(wf_L)>1)
+    wf_L /= abs(wf_L);
+  if(abs(wf_R)>1)
+    wf_R /= abs(wf_R);
+
+  int w[2];
+  w[0] = wf_L*MAX_RPM; // wL
+  w[1] = wf_R*MAX_RPM; // wR
+
+  //Serial.println(String(w[0]) + ' ' + String(w[1]));
+  omega.writeValue(&w, 8);
 }
