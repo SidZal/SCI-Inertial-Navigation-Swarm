@@ -2,20 +2,31 @@
 #include "Joystick.h"
 
 #define MAX_RPM 255
+#define RAW_DATA_SCALE 16384
 
 // Bluetooth Objects
 BLEService inrStation("b440");
 BLECharacteristic omega("ba89", BLERead, 8);
-BLECharacteristic inertialData("14df", BLEWrite | BLENotify, 16);
+BLECharacteristic dmpData("14df", BLEWrite | BLENotify, 28);
+BLECharacteristic rawData("70ce", BLEWrite | BLENotify, 12);
 BLEDevice central;
+
+// Command Tracker
+unsigned long cmdTimer = 0;
+unsigned long lastLoop = 0;
 
 // Joystick Objects
 Joystick jsA(A0);
 Joystick jsB(A1);
 
+// Omega Array
+int w[2];
+
 void setup() {
   Serial.begin(9600);
   while(!Serial);
+
+  Serial.setTimeout(1);
 
   // Calibrate Joysticks
   Serial.println(jsA.calibrate());
@@ -37,7 +48,8 @@ void setup() {
   BLE.setAdvertisedService(inrStation);
 
   inrStation.addCharacteristic(omega);
-  inrStation.addCharacteristic(inertialData);
+  inrStation.addCharacteristic(dmpData);
+  inrStation.addCharacteristic(rawData);
 
   BLE.addService(inrStation);
   BLE.advertise();
@@ -65,12 +77,38 @@ void loop() {
 }
 
 void receiverLoop() {
-  // Read quats
-  float quats[4];
-  inertialData.readValue(&quats, 16);
-  Serial.println(String(quats[0]) + ' ' + String(quats[1]) + ' ' + String(quats[2]) + ' ' + String(quats[3]));
+  unsigned long loopTime = millis(); // Remember current loop's time
+  readData();
 
-  // Write Joystick Inputs
+  if(cmdTimer > 0) {
+    unsigned long sinceLast = loopTime - lastLoop;
+    if (sinceLast > cmdTimer)
+      cmdTimer = 0;
+    else
+      cmdTimer -= sinceLast;
+  }
+  else {
+    String serCmd = Serial.readStringUntil(' ');
+    int param = Serial.readStringUntil('\n').toInt();
+    if(param>100) param = 100;
+    
+    if(serCmd == "circle") {
+      w[0] = 255;
+      w[1] = -255*param/100;
+      cmdTimer = 5000;
+    } 
+    else {
+      JoystickControl(w);
+    }
+  }
+
+  omega.writeValue(&w, 8);
+
+  lastLoop = loopTime; // global record of loop time
+}
+
+// reads joystick inputs, converts to wL and wR
+void JoystickControl(int* w) {
   float Ain = jsA.read();
   float Bin = jsB.read();
 
@@ -82,10 +120,31 @@ void receiverLoop() {
   if(abs(wf_R)>1)
     wf_R /= abs(wf_R);
 
-  int w[2];
   w[0] = wf_L*MAX_RPM; // wL
   w[1] = wf_R*MAX_RPM; // wR
+}
 
-  //Serial.println(String(w[0]) + ' ' + String(w[1]));
-  omega.writeValue(&w, 8);
+// main loop function that reads and processes data from peripheral
+void readData() {
+  // Read quats
+  float quatsypr[7];
+  dmpData.readValue(&quatsypr, 28);
+
+  int16_t rawMotion[6];
+  float rawC[6]; // raw data Converted
+  rawData.readValue(&rawMotion, 12);
+  for(int rawI = 0; rawI<6; rawI++)
+    rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
+
+  // Raw Accel, raw gyro, quats, ypr
+  Serial.println(printArray(rawC, 6) + ' ' + printArray(quatsypr, 7));
+}
+
+// helper function prints float array of given length
+String printArray(float* arr, int n) {
+  if(n<1) return "";
+  String result = String(arr[0]);
+  for(int i = 1; i<n; i++)
+    result += ' ' + String(arr[i]);
+  return result;
 }

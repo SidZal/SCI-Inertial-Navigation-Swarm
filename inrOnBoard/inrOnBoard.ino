@@ -12,7 +12,8 @@
 // Bluetooth UUIDs
 #define PERIPHERAL_UUID "b440"
 #define OMEGA_UUID "ba89"
-#define INERTIALDATA_UUID "14df"
+#define DMPDATA_UUID "14df"
+#define RAWDATA_UUID "70ce"
 
 #define MAX_RPM 255
 
@@ -22,7 +23,7 @@ uint8_t devStatus;      // return status after each device operation (0 = succes
 uint8_t fifoBuffer[64]; // FIFO storage buffer
 Quaternion q;
 VectorFloat gravity;
-float ypr[3];
+float quatsypr[7];
 float orientation[3];
 int16_t motion6[6];
 
@@ -31,7 +32,8 @@ bool scanning = false;
 BLEDevice peripheral;
 
 BLECharacteristic omega;
-BLECharacteristic inertialData;
+BLECharacteristic dmpData;
+BLECharacteristic rawData;
 
 // Motor + Encoder Pins
 #define PWMA 6
@@ -135,7 +137,8 @@ void loop() {
       }
 
       verifyCharacteristic(&omega, OMEGA_UUID);
-      verifyCharacteristic(&inertialData, INERTIALDATA_UUID);
+      verifyCharacteristic(&dmpData, DMPDATA_UUID);
+      verifyCharacteristic(&rawData, RAWDATA_UUID);
 
       Serial.println("Connection Successful");
 
@@ -180,7 +183,7 @@ void transmissionLoop() {
   //v[1] = -motorB.feedbackStep(Bref*MAX_RPM);
   //Serial.println(String(dt) + ' ' + String(theta_d) + ' '  + String(orientationError) + ' ' + String(X1[2]*180/pi) + ' ' + String(wInput) + ' ' + String(v[0]) + ' ' + String(v[1]));
   //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
-  Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]));
+  Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ' + String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
   /*
   Serial.write((uint8_t)(motion6[0] >> 8)); Serial.write((uint8_t)(motion6[0] & 0xFF));
   Serial.write((uint8_t)(motion6[1] >> 8)); Serial.write((uint8_t)(motion6[1] & 0xFF));
@@ -214,16 +217,16 @@ void readIMU() {
   if(mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+    mpu.dmpGetYawPitchRoll(quatsypr+4, &q, &gravity);
     mpu.getMotion6(motion6, motion6+1, motion6+2, motion6+3, motion6+4, motion6+5);
-    orientation[0] = ypr[0] * 180/M_PI;
-    orientation[1] = ypr[1] * 180/M_PI;
-    orientation[2] = ypr[2] * 180/M_PI;
+    orientation[0] = quatsypr[4] * 180/M_PI;
+    orientation[1] = quatsypr[5] * 180/M_PI;
+    orientation[2] = quatsypr[6] * 180/M_PI;
   }
 
-  float quats[4];
-  quats[0] = q.w; quats[1] = q.x; quats[2] = q.y; quats[3] = q.z;
-  inertialData.writeValue(&quats, 16);
+  quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
+  dmpData.writeValue(&quatsypr, 28);
+  rawData.writeValue(&motion6, 12);
 }
 
 void IMUsetup() {
