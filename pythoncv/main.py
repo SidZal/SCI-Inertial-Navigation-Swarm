@@ -2,8 +2,8 @@ import cv2
 import cv2.aruco as aruco
 import numpy as np
 import math
-import serial
 import time
+import serial
 
 #returns unit vector
 def unit_vector(vector):
@@ -31,12 +31,12 @@ def getAngle(x1, y1, x2, y2, x3, y3, x4, y4):
     
 #constants
 DICT_USED = aruco.DICT_6X6_50
-WINDOW_WIDTH = 640 #pixels
-WINDOW_HEIGHT = 480
-REAL_WIDTH = 640 #measure distance of frame in real life
-REAL_HEIGHT = 480
-
-# MARKER_SIZE = 2 #change if needed
+WINDOW_WIDTH = 700 #pixelsπ
+WINDOW_HEIGHT = 550
+x_dist = 40
+y_dist = 50
+# REAL_WIDTH = 640 #measure distance of frame in real life
+# REAL_HEIGHT = 480
 
 dictionary = aruco.getPredefinedDictionary(DICT_USED)
 parameters =  aruco.DetectorParameters()
@@ -46,8 +46,11 @@ cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WINDOW_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
 
-ser = serial.Serial(port='/dev/tty.usbmodem11301', baudrate=9600)
+# ser = serial.Serial(port='/dev/tty.usbmodem11201', baudrate=9600)
 file = open("/Users/lindsayqin/Downloads/test.txt", "a")
+start_time = time.time()
+
+# ser.write(bytes("circle 0\n", 'utf-8'))
 
 while True:
     success, frame = cap.read()
@@ -58,16 +61,36 @@ while True:
     mX = mY = mx1 = my1 = centerX = centerY = float(-1.0)
     
     if markerIDs is not None:
+        index0 = index3 = -1
+        
+        for i in range(len(markerIDs)):
+            if (markerIDs[i] == 0):
+                index0 = i
+                continue
+            if (markerIDs[i] == 3):
+                index3 = i
+                continue
+            
+            
+        m0x = markerCorners[index0][0][0][0]
+        m0y = markerCorners[index0][0][0][1]
+        m3x = markerCorners[index3][0][0][0]
+        m3y = markerCorners[index3][0][0][1]
+        
+        xFactor = x_dist/(m3x - m0x)
+        yFactor = y_dist/(m3y - m0y)
+
         for i in range(len(markerIDs)):
             mc = markerCorners[i]
             
-            coor = ser.readline()
-            file.write(coor.decode('utf-8') + "\n")
+            file.write("time: " + str(time.time()-start_time) + "\n")
             
-            coorString = "ID " + str(markerIDs[i]) + ": " + str(mc[0][0]) + '\n'
+            # coor = ser.readline()
+            # file.write((coor.decode('utf-8')).replace("\n", ""))
+            
+            coorString = "ID " + str(markerIDs[i]) + ": " + str((m3x - mc[0][0][0]) * xFactor) + ", " + str((m3y - mc[0][0][1])* yFactor)+ '\n'
             file.write(coorString)
             # ser.write(bytes(coorString, 'utf-8'))
-             
             x1 = mc[0][0][0]
             y1 = mc[0][0][1]
             x2 = mc[0][1][0]
@@ -78,7 +101,7 @@ while True:
             y4 = mc[0][3][1]
             
             a = getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4))
-            angleString = "ID " + str(markerIDs[i]) + ": " + str(a) + "\n"
+            angleString = "ID " + str(markerIDs[i]) + ": " + str(a) + "\n\n"
             file.write(angleString)
             # ser.write(bytes(angleString, 'utf-8'))
     
@@ -88,6 +111,7 @@ while True:
 
     if cv2.waitKey(1) & 0xFF == ord('q'): #press 'q' to quit
         break
+
 file.close()
 cap.release()
 cv2.destroyAllWindows()
