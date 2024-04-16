@@ -14,6 +14,8 @@ BLEDevice central;
 // Command Tracker
 unsigned long cmdTimer = 0;
 unsigned long lastLoop = 0;
+String serCmd;
+int param1, param2;
 
 // Joystick Objects
 Joystick jsA(A0);
@@ -78,33 +80,44 @@ void loop() {
 
 void receiverLoop() {
   unsigned long loopTime = millis(); // Remember current loop's time
-  readData();
+  readData(); // Read and print IMU data to serial
 
+  // Check for active command
   if(cmdTimer > 0) {
+    serialCommandControl(w, serCmd, param1, param2, false);
+
+    // Check if entered command has run its course
     unsigned long sinceLast = loopTime - lastLoop;
     if (sinceLast > cmdTimer)
       cmdTimer = 0;
     else
       cmdTimer -= sinceLast;
+
   }
-  else {
-    String serCmd = Serial.readStringUntil(' ');
-    int param = Serial.readStringUntil('\n').toInt();
-    if(param>100) param = 100;
-    
-    if(serCmd == "circle") {
-      w[0] = 255;
-      w[1] = -255*param/100;
-      cmdTimer = 5000;
-    } 
-    else {
-      JoystickControl(w);
-    }
+  else if (Serial.available()) {
+
+    // Read in serial command
+    serCmd = Serial.readStringUntil(' ');
+    param1 = Serial.readStringUntil(' ').toInt();
+    param2 = Serial.readStringUntil('\n').toInt();
+    serialCommandControl(w, serCmd, param1, param2, true);
+
   }
+  else // Default to joystick control
+    JoystickControl(w);
 
   omega.writeValue(&w, 8);
 
   lastLoop = loopTime; // global record of loop time
+}
+
+// new serial commands entered here
+void serialCommandControl(int* w, String serCmd, int cmdParam1, int cmdParam2, bool init) {
+  if(serCmd == "circle") {
+    if(init) cmdTimer = 5000;
+    w[0] = 255;
+    w[1] = -255*cmdParam1/10;
+  }
 }
 
 // reads joystick inputs, converts to wL and wR
@@ -137,7 +150,7 @@ void readData() {
     rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
 
   // Raw Accel, raw gyro, quats, ypr
-  Serial.println(printArray(rawC, 6) + ' ' + printArray(quatsypr, 7));
+  Serial.println(printArray(rawC, 6) + ", " + printArray(quatsypr, 7));
 }
 
 // helper function prints float array of given length
@@ -145,6 +158,6 @@ String printArray(float* arr, int n) {
   if(n<1) return "";
   String result = String(arr[0]);
   for(int i = 1; i<n; i++)
-    result += ' ' + String(arr[i]);
+    result += ", " + String(arr[i]);
   return result;
 }
