@@ -48,6 +48,8 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
 start_time = time.time()
 
 ser = serial.Serial(port='/dev/tty.usbmodem11201', baudrate=9600)
+# ser = arduinoserial.SerialPort('/dev/tty.usbmodem11301', 9600)
+
 with open(filename, "a") as csvfile:
     write = csv.writer(csvfile)
 
@@ -57,7 +59,9 @@ with open(filename, "a") as csvfile:
         if success:
             markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
     
+        #these values should never be used (overridden)
         mX = mY = mx1 = my1 = centerX = centerY = float(-1.0)
+        xFactor = yFactor = 1
     
         if markerIDs is not None:
             index0 = index3 = -1
@@ -71,20 +75,21 @@ with open(filename, "a") as csvfile:
                     index3 = i
                     continue
             
-            
             m0x = markerCorners[index0][0][0][0]
             m0y = markerCorners[index0][0][0][1]
             m3x = markerCorners[index3][0][0][0]
             m3y = markerCorners[index3][0][0][1]
         
-            xFactor = x_dist/(m3x - m0x)
-            yFactor = y_dist/(m3y - m0y)
+            if ((m3x - m0x) != 0 and (m3y - m0y) != 0):
+                xFactor = x_dist/(m3x - m0x)
+                yFactor = y_dist/(m3y - m0y)
 
             for i in range(len(markerIDs)):
                 mc = markerCorners[i]
             
                 # joystick = "doesn't work"
                 joystick = ((ser.readline()).decode('utf-8')).replace("\n", "")
+                # joystick = (ser.read_until('\n')).decode('utf-8').replace("\n", "")
             
                 xCoor = (m3x - mc[0][0][0]) * xFactor
                 yCoor = (m3y - mc[0][0][1])* yFactor
