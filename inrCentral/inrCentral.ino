@@ -4,6 +4,9 @@
 #define MAX_RPM 255
 #define RAW_DATA_SCALE 16384
 
+#define RED 22     
+#define BLUE 24     
+
 // Bluetooth Objects
 BLEService inrStation("b440");
 BLECharacteristic omega("ba89", BLERead, 8);
@@ -15,7 +18,7 @@ BLEDevice central;
 unsigned long cmdTimer = 0;
 unsigned long lastLoop = 0;
 String serCmd;
-int param1, param2;
+int param1, param2, param3;
 
 // Joystick Objects
 Joystick jsA(A0);
@@ -24,6 +27,9 @@ Joystick jsB(A1);
 // Omega Array
 int w[2];
 
+// Print debugging information
+bool debugger = false;
+
 void setup() {
   Serial.begin(9600);
   while(!Serial);
@@ -31,20 +37,26 @@ void setup() {
   Serial.setTimeout(1);
 
   // Calibrate Joysticks
-  Serial.println(jsA.calibrate());
-  Serial.println(jsB.calibrate());
-  delay(500);
+  if(debugger) {
+    Serial.println(jsA.calibrate());
+    Serial.println(jsB.calibrate());
+    delay(500);
+  }
+  else {
+    jsA.calibrate();
+    jsB.calibrate();
+  }
 
   jsA.setMax(255);
   jsB.setMax(255);
 
-  Serial.println("Initialzing BLE Service");  
+  if(debugger) Serial.println("Initialzing BLE Service");  
   // Initialize BLE Service
   if(!BLE.begin()) {
-    Serial.println("Failed to start BLE");
+    if(debugger) Serial.println("Failed to start BLE");
     while(1);
   }
-  Serial.println("BLE Initialized");
+  if(debugger) Serial.println("BLE Initialized");
 
   BLE.setLocalName("receiver");
   BLE.setAdvertisedService(inrStation);
@@ -55,7 +67,13 @@ void setup() {
 
   BLE.addService(inrStation);
   BLE.advertise();
-  Serial.println("Setup Complete");
+  if(debugger) Serial.println("Setup Complete");
+
+  pinMode(RED, OUTPUT);
+  pinMode(BLUE, OUTPUT);
+
+  digitalWrite(RED, LOW); // low is on, high is off
+  digitalWrite(BLUE, HIGH);
 }
 
 // Handles bluetooth, calls receiverLoop in normal operation
@@ -66,15 +84,19 @@ void loop() {
   }
   // Recently Disconnected
   else if (central) {
-    Serial.println("Disconnected from Central: " + central.address());
+    if(debugger) Serial.println("Disconnected from Central: " + central.address());
     central = BLE.central();
+    digitalWrite(BLUE, HIGH);
+    digitalWrite(RED, LOW);
   }
   // Scanning
   else {
-    Serial.println("Advertising BLE Service");
+    if(debugger) Serial.println("Advertising BLE Service");
     while(!central.connected())
       central = BLE.central();
-    Serial.println("Connected to Central: " + central.address());
+    if(debugger) Serial.println("Connected to Central: " + central.address());
+    digitalWrite(BLUE, LOW);
+    digitalWrite(RED, HIGH);
   }
 }
 
@@ -84,12 +106,14 @@ void receiverLoop() {
 
   // Check for active command
   if(cmdTimer > 0) {
-    serialCommandControl(w, serCmd, param1, param2, false);
+    serialCommandControl(w, serCmd, param1, param2, param3, false);
 
     // Check if entered command has run its course
     unsigned long sinceLast = loopTime - lastLoop;
-    if (sinceLast > cmdTimer)
+    if (sinceLast > cmdTimer) {
       cmdTimer = 0;
+      param1 = param2 = param3 = 0;
+    }
     else
       cmdTimer -= sinceLast;
 
@@ -99,8 +123,9 @@ void receiverLoop() {
     // Read in serial command
     serCmd = Serial.readStringUntil(' ');
     param1 = Serial.readStringUntil(' ').toInt();
-    param2 = Serial.readStringUntil('\n').toInt();
-    serialCommandControl(w, serCmd, param1, param2, true);
+    param2 = Serial.readStringUntil(' ').toInt();
+    param3 = Serial.readStringUntil('\n').toInt();
+    serialCommandControl(w, serCmd, param1, param2, param3, true);
 
   }
   else // Default to joystick control
@@ -112,7 +137,7 @@ void receiverLoop() {
 }
 
 // new serial commands entered here
-void serialCommandControl(int* w, String serCmd, int cmdParam1, int cmdParam2, bool init) {
+void serialCommandControl(int* w, String serCmd, int cmdParam1, int cmdParam2, int cmdParam3, bool init) {
   if(serCmd == "circle") {
     if(init) cmdTimer = 5000;
     w[0] = 255;
