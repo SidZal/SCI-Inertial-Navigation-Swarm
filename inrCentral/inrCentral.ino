@@ -7,18 +7,24 @@
 #define RED 22     
 #define BLUE 24     
 
+#define pi 3.1415926
+
 // Bluetooth Objects
 BLEService inrStation("b440");
 BLECharacteristic omega("ba89", BLERead, 8);
-BLECharacteristic dmpData("14df", BLEWrite | BLENotify, 28);
-BLECharacteristic rawData("70ce", BLEWrite | BLENotify, 12);
+BLECharacteristic dmpData("14df", BLEWrite | BLENotify | BLEIndicate, 28);
+BLECharacteristic rawData("70ce", BLEWrite | BLENotify | BLEIndicate, 12);
+BLECharacteristic headingControl("289b", BLERead, 8);
+BLECharacteristic PIDtune("0ef0", BLERead, 12);
 BLEDevice central;
 
 // Command Tracker
 unsigned long cmdTimer = 0;
 unsigned long lastLoop = 0;
 String serCmd;
-int param1, param2, param3;
+float param1, param2, param3;
+float integrator;
+float previousE;
 
 // Joystick Objects
 Joystick jsA(A0);
@@ -28,7 +34,11 @@ Joystick jsB(A1);
 int w[2];
 
 // Print debugging information
-bool debugger = false;
+bool debugger = true;
+
+// IMU Data
+float quatsypr[7];
+float rawC[6];
 
 void setup() {
   Serial.begin(9600);
@@ -64,6 +74,8 @@ void setup() {
   inrStation.addCharacteristic(omega);
   inrStation.addCharacteristic(dmpData);
   inrStation.addCharacteristic(rawData);
+  inrStation.addCharacteristic(headingControl);
+  inrStation.addCharacteristic(PIDtune);
 
   BLE.addService(inrStation);
   BLE.advertise();
@@ -74,6 +86,9 @@ void setup() {
 
   digitalWrite(RED, LOW); // low is on, high is off
   digitalWrite(BLUE, HIGH);
+
+  float href[2]; href[0] = 0;
+  headingControl.writeValue(&href, 8);
 }
 
 // Handles bluetooth, calls receiverLoop in normal operation
@@ -102,30 +117,31 @@ void loop() {
 
 void receiverLoop() {
   unsigned long loopTime = millis(); // Remember current loop's time
+  unsigned long dT = loopTime - lastLoop;
   readData(); // Read and print IMU data to serial
 
   // Check for active command
   if(cmdTimer > 0) {
-    serialCommandControl(w, serCmd, param1, param2, param3, false);
 
-    // Check if entered command has run its course
-    unsigned long sinceLast = loopTime - lastLoop;
-    if (sinceLast > cmdTimer) {
+
+    if (dT > cmdTimer) {
+      serialCommandControl(dT, w, serCmd, param1, param2, param3, false, true);
       cmdTimer = 0;
       param1 = param2 = param3 = 0;
     }
-    else
-      cmdTimer -= sinceLast;
-
+    else {
+      cmdTimer -= dT;
+      serialCommandControl(dT, w, serCmd, param1, param2, param3, false, false);
+    }
   }
   else if (Serial.available()) {
 
     // Read in serial command
     serCmd = Serial.readStringUntil(' ');
-    param1 = Serial.readStringUntil(' ').toInt();
-    param2 = Serial.readStringUntil(' ').toInt();
-    param3 = Serial.readStringUntil('\n').toInt();
-    serialCommandControl(w, serCmd, param1, param2, param3, true);
+    param1 = Serial.readStringUntil(' ').toFloat();
+    param2 = Serial.readStringUntil(' ').toFloat();
+    param3 = Serial.readStringUntil('\n').toFloat();
+    serialCommandControl(dT, w, serCmd, param1, param2, param3, true, false);
 
   }
   else // Default to joystick control
@@ -137,11 +153,41 @@ void receiverLoop() {
 }
 
 // new serial commands entered here
-void serialCommandControl(int* w, String serCmd, int cmdParam1, int cmdParam2, int cmdParam3, bool init) {
+void serialCommandControl(unsigned long dTmillis, int* w, String serCmd, float cmdParam1, float cmdParam2, float cmdParam3, bool init, bool fnl) {
+  double dT = dTmillis/1000.;
+
   if(serCmd == "circle") {
     if(init) cmdTimer = 5000;
     w[0] = 255;
     w[1] = -255*cmdParam1/10;
+  }
+  else if(serCmd == "heading") {
+    if(init) {cmdTimer = 10000; integrator = 0; previousE = 0;}
+    float href[2];
+    if(fnl) href[0] = 0; else href[0] = 1;
+    href[1] = cmdParam1;
+    headingControl.writeValue(&href, 8);
+    /*
+    float e_deg = cmdParam1 - quatsypr[4]*180/3.1415;
+    integrator += e_deg*dT;
+    float e_der = (e_deg-previousE)/dT;
+    previousE = e_deg;
+    int controlIn = .5*e_deg + .75*integrator + 5*e_der;
+    Serial.println(String(e_deg) + ' ' + String(integrator) + ' ' + String(e_der) + ' ' + String(controlIn));
+    w[0] = -controlIn;
+    w[1] = -controlIn;
+    */
+  }
+  else if(serCmd == "sineHeading") {
+    if(init) cmdTimer = 10000;
+    int PWMin = 10*(2*3.1415*sin(10-cmdTimer/1000.) - quatsypr[4]);
+    Serial.println(PWMin);
+    w[0] = PWMin;
+    w[1] = PWMin;
+  }
+  else if(serCmd == "PID") {
+    float newPID[3]; newPID[0] = cmdParam1; newPID[1] = cmdParam2; newPID[2] = cmdParam3;
+    PIDtune.writeValue(&newPID, 12);
   }
 }
 
@@ -164,18 +210,20 @@ void JoystickControl(int* w) {
 
 // main loop function that reads and processes data from peripheral
 void readData() {
-  // Read quats
-  float quatsypr[7];
-  dmpData.readValue(&quatsypr, 28);
+  if(1) {
+    // Read quats
+    //float prevHeading = quatsypr[4];
+    dmpData.readValue(&quatsypr, 28);
+    //quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
 
-  int16_t rawMotion[6];
-  float rawC[6]; // raw data Converted
-  rawData.readValue(&rawMotion, 12);
-  for(int rawI = 0; rawI<6; rawI++)
-    rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
+    int16_t rawMotion[6];
+    rawData.readValue(&rawMotion, 12);
+    for(int rawI = 0; rawI<6; rawI++)
+      rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
 
-  // Raw Accel, raw gyro, quats, ypr
-  Serial.println(printArray(rawC, 6) + ", " + printArray(quatsypr, 7));
+    // Raw Accel, raw gyro, quats, ypr
+    Serial.println(printArray(rawC, 6) + ", " + printArray(quatsypr, 7));
+  }
 }
 
 // helper function prints float array of given length

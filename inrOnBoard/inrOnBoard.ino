@@ -14,6 +14,8 @@
 #define OMEGA_UUID "ba89"
 #define DMPDATA_UUID "14df"
 #define RAWDATA_UUID "70ce"
+#define HEADINGCONTROL_UUID "289b"
+#define PIDTUNE_UUID "0ef0"
 
 #define MAX_RPM 255
 
@@ -34,6 +36,8 @@ BLEDevice peripheral;
 BLECharacteristic omega;
 BLECharacteristic dmpData;
 BLECharacteristic rawData;
+BLECharacteristic headingControl;
+BLECharacteristic PIDtune;
 
 // Motor + Encoder Pins
 #define PWMA 6
@@ -53,7 +57,7 @@ BLECharacteristic rawData;
 #define pi 3.1415926
 
 // Low-Level Speed Control Parameters
-const float CPR = 12;
+const float CPR = 3;
 const float gearRatio = 100.37;
 const float conversionRatio = 4./CPR*60/gearRatio;
 Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
@@ -62,15 +66,19 @@ Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 float v[2];
 
 // Orientation Controller Variables
+/*
 int n = 3; // State Variables
 double t0 = 0, t1;
 double X0[3], X1[3];
-int wL = 0, wR = 0;
 double kp = .05;
 double wMax = 10, wComm, wInput;
 double orientationError;
-unsigned long millisLast = 0;
 double theta_d=0;
+*/
+unsigned long millisLast = 0;
+int wL = 0, wR = 0;
+float integrator;
+float e_prev;
 
 void setup() {
   #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
@@ -84,7 +92,7 @@ void setup() {
 
   IMUsetup();
 
-  X0[0] = X0[1] = X0[2] = 0.0;
+  //X0[0] = X0[1] = X0[2] = 0.0;
   attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(C1B), motorBInterrupt, RISING);
 
@@ -139,6 +147,8 @@ void loop() {
       verifyCharacteristic(&omega, OMEGA_UUID);
       verifyCharacteristic(&dmpData, DMPDATA_UUID);
       verifyCharacteristic(&rawData, RAWDATA_UUID);
+      verifyCharacteristic(&headingControl, HEADINGCONTROL_UUID);
+      verifyCharacteristic(&PIDtune, PIDTUNE_UUID);
 
       Serial.println("Connection Successful");
 
@@ -150,14 +160,32 @@ void loop() {
 void transmissionLoop() {
   readIMU();
 
+  float pidks[3];
+  PIDtune.readValue(&pidks,12);
+
   double dt = (millis() - millisLast)/1000.0;
   if(dt < 0.05)
     return;
   millisLast = millis();
 
-  int w[2];
-  omega.readValue(&w, 8);
-  wL = w[0]; wR = w[1];
+  float href[2];
+  headingControl.readValue(&href, 8);
+  if(href[0]) {
+    float e_deg = href[1] - quatsypr[4] * 180/pi;
+    integrator += e_deg*dt;
+    float e_der = (e_deg-e_prev)/dt;
+    e_prev = e_deg;
+    int controlIn = pidks[0]*e_deg + pidks[1]*integrator + pidks[2]*e_der;
+    Serial.println(String(dt) + ' ' + String(pidks[0]) + ' ' + String(e_deg) + ' ' + String(pidks[1]) + ' ' + String(integrator) + ' ' + String(pidks[2]) + ' ' + String(e_der) + ' ' + String(quatsypr[4]));
+    wL = -controlIn; wR = -controlIn;
+  }
+  else {
+    if(integrator != 0) {integrator = 0; e_prev = 0;}
+
+    int w[2];
+    omega.readValue(&w, 8);
+    wL = w[0]; wR = w[1];
+  }
 
   /*
   if(pow(jsA,2) + pow(jsB,2) > 0.8) 
@@ -183,7 +211,7 @@ void transmissionLoop() {
   //v[1] = -motorB.feedbackStep(Bref*MAX_RPM);
   //Serial.println(String(dt) + ' ' + String(theta_d) + ' '  + String(orientationError) + ' ' + String(X1[2]*180/pi) + ' ' + String(wInput) + ' ' + String(v[0]) + ' ' + String(v[1]));
   //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
-  Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ' + String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
+  //Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ' + String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
   /*
   Serial.write((uint8_t)(motion6[0] >> 8)); Serial.write((uint8_t)(motion6[0] & 0xFF));
   Serial.write((uint8_t)(motion6[1] >> 8)); Serial.write((uint8_t)(motion6[1] & 0xFF));
@@ -215,10 +243,14 @@ void motorBInterrupt() {
 
 void readIMU() {
   if(mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
+    float prevHeading = quatsypr[4];
+
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(quatsypr+4, &q, &gravity);
     mpu.getMotion6(motion6, motion6+1, motion6+2, motion6+3, motion6+4, motion6+5);
+
+    quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
     orientation[0] = quatsypr[4] * 180/M_PI;
     orientation[1] = quatsypr[5] * 180/M_PI;
     orientation[2] = quatsypr[6] * 180/M_PI;
@@ -227,6 +259,17 @@ void readIMU() {
   quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
   dmpData.writeValue(&quatsypr, 28);
   rawData.writeValue(&motion6, 12);
+}
+
+// helper function to unwrap two angles
+float unwrap(float prev, float next) {
+  while(abs(prev-next) > pi)
+    if(next>prev)
+      next -= 2*pi;
+    else
+      next += 2*pi;
+
+  return next;
 }
 
 void IMUsetup() {
