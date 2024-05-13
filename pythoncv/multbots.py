@@ -1,10 +1,10 @@
-import csv
 import cv2
 import cv2.aruco as aruco
 import numpy as np
 import math
 import time
 import serial
+import BotWriter
 
 #returns unit vector
 def unit_vector(vector):
@@ -48,16 +48,17 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
 start_time = time.time()
 
 ser = serial.Serial(port='/dev/tty.usbmodem11201', baudrate=9600)
-# ser = arduinoserial.SerialPort('/dev/tty.usbmodem11301', 9600)
-
-with open(filename, "a") as csvfile:
-    write = csv.writer(csvfile)
-
-    while True:
-        success, frame = cap.read()
+ #initialize here w/ list of ids - not sure if we want to though (maybe get in the while loop?)
+idList = []
+botDict = {}
+for i in idList:
+    botDict[i] = BotWriter(i)
     
-        if success:
-            markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
+while True:
+    success, frame = cap.read()
+    
+    if success:            
+        markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
     
         #these values should never be used (overridden)
         mX = mY = mx1 = my1 = centerX = centerY = float(-1.0)
@@ -105,7 +106,7 @@ with open(filename, "a") as csvfile:
             
                 angle = getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4))
                 
-                write.writerow([str(time.time()-start_time), i, joystick, xCoor, yCoor, angle])
+                botDict[i].writeRow([str(time.time()-start_time), i, joystick, xCoor, yCoor, angle])
     
         QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
         
