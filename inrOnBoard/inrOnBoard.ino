@@ -11,13 +11,13 @@
 
 // Bluetooth UUIDs
 #define PERIPHERAL_UUID "b440"
+#define UPDATED_UUID "cf1a"
 #define OMEGA_UUID "ba89"
+#define OMEGADATA_UUID "c81a"
 #define DMPDATA_UUID "14df"
 #define RAWDATA_UUID "70ce"
 #define HEADINGCONTROL_UUID "289b"
 #define PIDTUNE_UUID "0ef0"
-
-#define MAX_RPM 255
 
 // IMU Setup
 MPU6050 mpu;
@@ -33,7 +33,9 @@ int16_t motion6[6];
 bool scanning = false;
 BLEDevice peripheral;
 
+BLECharacteristic updated;
 BLECharacteristic omega;
+BLECharacteristic omegaData;
 BLECharacteristic dmpData;
 BLECharacteristic rawData;
 BLECharacteristic headingControl;
@@ -49,17 +51,19 @@ BLECharacteristic PIDtune;
 #define MOTOR_STANDBY 9
 
 #define PWMB 12
-#define in3 10
-#define in4 11
+#define in3 11
+#define in4 10
 #define C1B 2
 #define C2B 4
 
 #define pi 3.1415926
 
+#define MAX_RPM 100
+
 // Low-Level Speed Control Parameters
-const float CPR = 3;
-const float gearRatio = 100.37;
-const float conversionRatio = 4./CPR*60/gearRatio;
+const float countsPerRotation = 3;
+const float gearRatio = 298;
+const float conversionRatio = 1./countsPerRotation*60/gearRatio;
 Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
 Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 
@@ -76,7 +80,7 @@ double orientationError;
 double theta_d=0;
 */
 unsigned long millisLast = 0;
-int wL = 0, wR = 0;
+float wL = 0, wR = 0;
 float integrator;
 float e_prev;
 
@@ -98,8 +102,8 @@ void setup() {
 
   digitalWrite(MOTOR_STANDBY, HIGH);
 
-  motorA.tunePID(1, 4, 0);
-  motorB.tunePID(1, 4, 0);
+  motorA.tunePID(1.5, 1, 0);
+  motorB.tunePID(1.5, 1, 0);
 
   Serial.println("Initializing BLE");
   if(!BLE.begin()) {
@@ -144,7 +148,9 @@ void loop() {
         return;
       }
 
+      verifyCharacteristic(&updated, UPDATED_UUID);
       verifyCharacteristic(&omega, OMEGA_UUID);
+      verifyCharacteristic(&omegaData, OMEGADATA_UUID);
       verifyCharacteristic(&dmpData, DMPDATA_UUID);
       verifyCharacteristic(&rawData, RAWDATA_UUID);
       verifyCharacteristic(&headingControl, HEADINGCONTROL_UUID);
@@ -160,6 +166,7 @@ void loop() {
 void transmissionLoop() {
   readIMU();
 
+  /*
   float pidks[3];
   PIDtune.readValue(&pidks,12);
 
@@ -170,6 +177,7 @@ void transmissionLoop() {
 
   float href[2];
   headingControl.readValue(&href, 8);
+  
   if(href[0]) {
     float e_deg = href[1] - quatsypr[4] * 180/pi;
     integrator += e_deg*dt;
@@ -186,6 +194,7 @@ void transmissionLoop() {
     omega.readValue(&w, 8);
     wL = w[0]; wR = w[1];
   }
+  */
 
   /*
   if(pow(jsA,2) + pow(jsB,2) > 0.8) 
@@ -205,21 +214,16 @@ void transmissionLoop() {
     X0[i] = X1[i];
   */
 
-  motorA.drive(wL);
-  motorB.drive(wR);
+  int w[2];
+  omega.readValue(&w, 8);
+  wL = w[0]; wR = w[1];
+  v[0] = motorA.feedbackStep(wL);
+  v[1] = motorB.feedbackStep(wR);
   //v[0] = motorA.feedbackStep(Aref*MAX_RPM);
   //v[1] = -motorB.feedbackStep(Bref*MAX_RPM);
   //Serial.println(String(dt) + ' ' + String(theta_d) + ' '  + String(orientationError) + ' ' + String(X1[2]*180/pi) + ' ' + String(wInput) + ' ' + String(v[0]) + ' ' + String(v[1]));
-  //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
+  Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
   //Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ' + String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
-  /*
-  Serial.write((uint8_t)(motion6[0] >> 8)); Serial.write((uint8_t)(motion6[0] & 0xFF));
-  Serial.write((uint8_t)(motion6[1] >> 8)); Serial.write((uint8_t)(motion6[1] & 0xFF));
-  Serial.write((uint8_t)(motion6[2] >> 8)); Serial.write((uint8_t)(motion6[2] & 0xFF));
-  Serial.write((uint8_t)(motion6[3] >> 8)); Serial.write((uint8_t)(motion6[3] & 0xFF));
-  Serial.write((uint8_t)(motion6[4] >> 8)); Serial.write((uint8_t)(motion6[4] & 0xFF));
-  Serial.write((uint8_t)(motion6[5] >> 8)); Serial.write((uint8_t)(motion6[5] & 0xFF));
-  */
   //delay(50);
 }
 
@@ -254,11 +258,15 @@ void readIMU() {
     orientation[0] = quatsypr[4] * 180/M_PI;
     orientation[1] = quatsypr[5] * 180/M_PI;
     orientation[2] = quatsypr[6] * 180/M_PI;
-  }
 
-  quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
-  dmpData.writeValue(&quatsypr, 28);
-  rawData.writeValue(&motion6, 12);
+    quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
+    dmpData.writeValue(&quatsypr, 28);
+    rawData.writeValue(&motion6, 12);
+    
+    bool update = true;
+    updated.writeValue(&update, 1);
+  }
+  omegaData.writeValue(&v, 8);
 }
 
 // helper function to unwrap two angles

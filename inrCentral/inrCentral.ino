@@ -1,19 +1,26 @@
 #include <ArduinoBLE.h>
 #include "Joystick.h"
 
-#define MAX_RPM 255
+// Constants
+#define MAX_RPM 100
 #define RAW_DATA_SCALE 16384
-
-#define RED 22     
-#define BLUE 24     
-
 #define pi 3.1415926
 
 // Bluetooth Objects
 BLEService inrStation("b440");
+
+// Indicator Characteristic
+BLECharacteristic updated("cf1a", BLEWrite, 1);
+
+// Characteristic for sending wL/wR to robot
 BLECharacteristic omega("ba89", BLERead, 8);
+
+// Characteristics for receiving data from Robot
+BLECharacteristic omegaData("c81a", BLEWrite | BLENotify | BLEIndicate, 8);
 BLECharacteristic dmpData("14df", BLEWrite | BLENotify | BLEIndicate, 28);
 BLECharacteristic rawData("70ce", BLEWrite | BLENotify | BLEIndicate, 12);
+
+// Special mode characteristics
 BLECharacteristic headingControl("289b", BLERead, 8);
 BLECharacteristic PIDtune("0ef0", BLERead, 12);
 BLEDevice central;
@@ -40,9 +47,11 @@ bool debugger = true;
 float quatsypr[7];
 float rawC[6];
 
+String last;
+
 void setup() {
   Serial.begin(9600);
-  while(!Serial);
+  //while(!Serial);
 
   Serial.setTimeout(1);
 
@@ -61,32 +70,33 @@ void setup() {
   jsB.setMax(255);
 
   if(debugger) Serial.println("Initialzing BLE Service");  
-  // Initialize BLE Service
   if(!BLE.begin()) {
     if(debugger) Serial.println("Failed to start BLE");
     while(1);
   }
   if(debugger) Serial.println("BLE Initialized");
 
+  // BLE Setup
   BLE.setLocalName("receiver");
   BLE.setAdvertisedService(inrStation);
 
+  inrStation.addCharacteristic(updated);
   inrStation.addCharacteristic(omega);
+  inrStation.addCharacteristic(omegaData);
   inrStation.addCharacteristic(dmpData);
   inrStation.addCharacteristic(rawData);
   inrStation.addCharacteristic(headingControl);
   inrStation.addCharacteristic(PIDtune);
 
+
   BLE.addService(inrStation);
   BLE.advertise();
   if(debugger) Serial.println("Setup Complete");
 
-  pinMode(RED, OUTPUT);
-  pinMode(BLUE, OUTPUT);
+  digitalWrite(LEDR, LOW); // low is on, high is off
+  digitalWrite(LEDB, HIGH);
 
-  digitalWrite(RED, LOW); // low is on, high is off
-  digitalWrite(BLUE, HIGH);
-
+  // HEading controller intiialization
   float href[2]; href[0] = 0;
   headingControl.writeValue(&href, 8);
 }
@@ -97,21 +107,23 @@ void loop() {
   if(central.connected()) {
     receiverLoop();
   }
-  // Recently Disconnected
+  // Recently Disconnected, central is still assigned but connection failed in last if()
   else if (central) {
     if(debugger) Serial.println("Disconnected from Central: " + central.address());
     central = BLE.central();
-    digitalWrite(BLUE, HIGH);
-    digitalWrite(RED, LOW);
+    digitalWrite(LEDB, HIGH);
+    digitalWrite(LEDR, LOW);
   }
   // Scanning
   else {
     if(debugger) Serial.println("Advertising BLE Service");
     while(!central.connected())
       central = BLE.central();
+      
+    
     if(debugger) Serial.println("Connected to Central: " + central.address());
-    digitalWrite(BLUE, LOW);
-    digitalWrite(RED, HIGH);
+    digitalWrite(LEDB, LOW);
+    digitalWrite(LEDR, HIGH);
   }
 }
 
@@ -122,8 +134,6 @@ void receiverLoop() {
 
   // Check for active command
   if(cmdTimer > 0) {
-
-
     if (dT > cmdTimer) {
       serialCommandControl(dT, w, serCmd, param1, param2, param3, false, true);
       cmdTimer = 0;
@@ -142,7 +152,6 @@ void receiverLoop() {
     param2 = Serial.readStringUntil(' ').toFloat();
     param3 = Serial.readStringUntil('\n').toFloat();
     serialCommandControl(dT, w, serCmd, param1, param2, param3, true, false);
-
   }
   else // Default to joystick control
     JoystickControl(w);
@@ -210,20 +219,36 @@ void JoystickControl(int* w) {
 
 // main loop function that reads and processes data from peripheral
 void readData() {
-  if(1) {
-    // Read quats
-    //float prevHeading = quatsypr[4];
-    dmpData.readValue(&quatsypr, 28);
-    //quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
+  // Read quats
+  //float prevHeading = quatsypr[4];
+  dmpData.readValue(&quatsypr, 28);
+  //quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
 
-    int16_t rawMotion[6];
-    rawData.readValue(&rawMotion, 12);
-    for(int rawI = 0; rawI<6; rawI++)
-      rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
+  int16_t rawMotion[6];
+  rawData.readValue(&rawMotion, 12);
+  for(int rawI = 0; rawI<6; rawI++)
+    rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
 
-    // Raw Accel, raw gyro, quats, ypr
-    Serial.println(printArray(rawC, 6) + ", " + printArray(quatsypr, 7));
+  float wheelVelocity[2];
+  omegaData.readValue(&wheelVelocity, 8);
+  // Raw Accel, raw gyro, quats, ypr
+  String output = printArray(rawC, 6) + ", " + printArray(quatsypr, 7) + ", " + printArray(wheelVelocity, 2);
+  if(output != last) {
+    Serial.println(output);
+    last = output;
   }
+}
+
+bool dataUpdated() {
+  bool update;
+  updated.readValue(&update, 1);
+  if(update) {
+    update = false;
+    updated.writeValue(&update, 1);
+    return true;
+  }
+  else
+    return false;
 }
 
 // helper function prints float array of given length
