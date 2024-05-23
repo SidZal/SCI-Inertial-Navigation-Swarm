@@ -99,7 +99,7 @@ with open(FILENAME, "a") as csvfile:
                 line = re.sub(r"\s+", '', line)
                 list = line.split(',', 12)
                 if (len(list) == 13):
-                    ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r = line.split(',', 12)
+                    ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r, omegaR, omegaL = line.split(',', 14)
 
                 xCoor = (m3x - mc[0][0][0]) * xFactor
                 yCoor = (m3y - mc[0][0][1])* yFactor
@@ -120,7 +120,7 @@ with open(FILENAME, "a") as csvfile:
                 angle = getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4)) - refAngle
 
                 if ((markerIDs[i] != 0) and (markerIDs[i] != 3)):
-                    write.writerow([float(time.time()-start_time), int(markerIDs[i]), ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r, xCoor, yCoor, angle])
+                    write.writerow([float(time.time()-start_time), int(markerIDs[i]), ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r, omegaR, omegaL, xCoor, yCoor, angle])
 
         QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
 
