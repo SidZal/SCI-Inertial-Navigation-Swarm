@@ -9,17 +9,26 @@
     #include "Wire.h"
 #endif
 
-// Bluetooth UUIDs
-#define PERIPHERAL_UUID "b440"
-#define UPDATED_UUID "cf1a"
-#define OMEGA_UUID "ba89"
-#define OMEGADATA_UUID "c81a"
-#define DMPDATA_UUID "14df"
-#define RAWDATA_UUID "70ce"
-#define HEADINGCONTROL_UUID "289b"
-#define PIDTUNE_UUID "0ef0"
+//
+// Bluetooth Variables
+//
+// BLE Service Setup
+BLEService inrService("b440");
+// Characteristic for sending wL/wR to robot
+BLECharacteristic omega("ba89", BLEWrite, 8);
 
-// IMU Setup
+// Characteristics for receiving data from Robot
+BLECharacteristic omegaData("c81a", BLERead, 8);
+BLECharacteristic dmpData("14df", BLERead, 28);
+BLECharacteristic rawData("70ce", BLERead, 28);
+
+// Special mode characteristics
+BLECharacteristic headingControl("289b", BLEWrite, 8);
+BLECharacteristic PIDtune("0ef0", BLEWrite, 12);
+
+//
+// IMU Variables
+//
 MPU6050 mpu;
 uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
 uint8_t fifoBuffer[64]; // FIFO storage buffer
@@ -29,19 +38,9 @@ float quatsypr[7];
 float orientation[3];
 int16_t motion6[6];
 
-// Bluetooth Helper Variables
-bool scanning = false;
-BLEDevice peripheral;
-
-BLECharacteristic updated;
-BLECharacteristic omega;
-BLECharacteristic omegaData;
-BLECharacteristic dmpData;
-BLECharacteristic rawData;
-BLECharacteristic headingControl;
-BLECharacteristic PIDtune;
-
-// Motor + Encoder Pins
+//
+// Motor Speed Control Variables
+//
 #define PWMA 6
 #define in1 8
 #define in2 7
@@ -69,16 +68,6 @@ Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 
 float v[2];
 
-// Orientation Controller Variables
-/*
-int n = 3; // State Variables
-double t0 = 0, t1;
-double X0[3], X1[3];
-double kp = .05;
-double wMax = 10, wComm, wInput;
-double orientationError;
-double theta_d=0;
-*/
 unsigned long millisLast = 0;
 float wL = 0, wR = 0;
 float integrator;
@@ -92,149 +81,61 @@ void setup() {
     Fastwire::setup(400, true);
   #endif
 
-  Serial.begin(9600);
+  Serial.begin(115200);
+  //while(!Serial);
 
   IMUsetup();
 
-  //X0[0] = X0[1] = X0[2] = 0.0;
   attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(C1B), motorBInterrupt, RISING);
 
   digitalWrite(MOTOR_STANDBY, HIGH);
 
-  motorA.tunePID(1.5, 1, 0);
-  motorB.tunePID(1.5, 1, 0);
+  motorA.tunePID(5, 1, 0);
+  motorB.tunePID(5, 1, 0);
 
-  Serial.println("Initializing BLE");
+  Serial.println("Initializing BLE Service");
   if(!BLE.begin()) {
     Serial.println("Failed to initialize BLE");
     while(1);
   }
   Serial.println("BLE Initialized");
+  Serial.println(BLE.address());
+
+  BLE.setLocalName("INR1");
+  BLE.setAdvertisedService(inrService);
+
+  inrService.addCharacteristic(omega);
+  inrService.addCharacteristic(omegaData);
+  inrService.addCharacteristic(dmpData);
+  inrService.addCharacteristic(rawData);
+  inrService.addCharacteristic(headingControl);
+  inrService.addCharacteristic(PIDtune);
+
+  BLE.addService(inrService);
+  BLE.advertise();
+  Serial.println("Setup Complete");
+
+  BLE.setEventHandler(BLEConnected, inrConnect);
+  BLE.setEventHandler(BLEDisconnected, inrDisconnect);
+  omega.setEventHandler(BLEWritten, setSpeedFromBLE);
+  PIDtune.setEventHandler(BLEWritten, setPID);
+
+  // Red light -> no connection, blue light -> connection
+  digitalWrite(LEDR, LOW);
+  digitalWrite(LEDB, HIGH);
 }
 
 void loop() {
-  if(peripheral.connected()) {
-    transmissionLoop();
-  }
-  else if (peripheral) {
-    Serial.println("Disconnected from Peripheral: " + peripheral.localName());
-    peripheral = BLE.available();
-  }
-  else {
-
-    if(!scanning) {
-      BLE.scanForUuid(PERIPHERAL_UUID);
-      scanning = true;
-      Serial.println("Scanning...");
-    }
-
-    peripheral = BLE.available();
-    if(peripheral) {
-      Serial.println("Found: " + peripheral.localName());
-      if (peripheral.localName() != "receiver") return;
-      BLE.stopScan();
-      scanning = false;
-
-      // Verify Connection
-      if(!peripheral.connect()) {
-        Serial.println("Failed to Connect");
-        return;
-      }
-
-      if(!peripheral.discoverAttributes()) {
-        Serial.println("Failed to Discover Attributes");
-        peripheral.disconnect();
-        return;
-      }
-
-      verifyCharacteristic(&updated, UPDATED_UUID);
-      verifyCharacteristic(&omega, OMEGA_UUID);
-      verifyCharacteristic(&omegaData, OMEGADATA_UUID);
-      verifyCharacteristic(&dmpData, DMPDATA_UUID);
-      verifyCharacteristic(&rawData, RAWDATA_UUID);
-      verifyCharacteristic(&headingControl, HEADINGCONTROL_UUID);
-      verifyCharacteristic(&PIDtune, PIDTUNE_UUID);
-
-      Serial.println("Connection Successful");
-
-      millisLast = millis();
-    }
-  }
-}
-
-void transmissionLoop() {
   readIMU();
-
-  /*
-  float pidks[3];
-  PIDtune.readValue(&pidks,12);
-
-  double dt = (millis() - millisLast)/1000.0;
-  if(dt < 0.05)
-    return;
-  millisLast = millis();
-
-  float href[2];
-  headingControl.readValue(&href, 8);
+  BLE.poll();
   
-  if(href[0]) {
-    float e_deg = href[1] - quatsypr[4] * 180/pi;
-    integrator += e_deg*dt;
-    float e_der = (e_deg-e_prev)/dt;
-    e_prev = e_deg;
-    int controlIn = pidks[0]*e_deg + pidks[1]*integrator + pidks[2]*e_der;
-    Serial.println(String(dt) + ' ' + String(pidks[0]) + ' ' + String(e_deg) + ' ' + String(pidks[1]) + ' ' + String(integrator) + ' ' + String(pidks[2]) + ' ' + String(e_der) + ' ' + String(quatsypr[4]));
-    wL = -controlIn; wR = -controlIn;
-  }
-  else {
-    if(integrator != 0) {integrator = 0; e_prev = 0;}
-
-    int w[2];
-    omega.readValue(&w, 8);
-    wL = w[0]; wR = w[1];
-  }
-  */
-
-  /*
-  if(pow(jsA,2) + pow(jsB,2) > 0.8) 
-    theta_d = -atan2(jsA, jsB)*180/pi;
-
-  orientationError = theta_d - X0[2]*180/pi;
-  wComm = speedSaturator(kp*orientationError, wMax);
-  wInput = -wComm * 60 / (2*pi);
-  
-  t1 = t0 + dt;
-  
-  rk4(t0, n, X0, X1, dt, v[0]*2*pi/60, v[1]*2*pi/60, dualWheelModel);
-  //rk4(t0, n, X0, X1, dt, -wComm, wComm, dualWheelModel);
-
-  t0 = t1;
-  for(int i=0; i<n; i++)
-    X0[i] = X1[i];
-  */
-
-  int w[2];
-  omega.readValue(&w, 8);
-  wL = w[0]; wR = w[1];
   v[0] = motorA.feedbackStep(wL);
   v[1] = motorB.feedbackStep(wR);
-  //v[0] = motorA.feedbackStep(Aref*MAX_RPM);
-  //v[1] = -motorB.feedbackStep(Bref*MAX_RPM);
+  //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
   //Serial.println(String(dt) + ' ' + String(theta_d) + ' '  + String(orientationError) + ' ' + String(X1[2]*180/pi) + ' ' + String(wInput) + ' ' + String(v[0]) + ' ' + String(v[1]));
-  Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
+  //Serial.println(String(MAX_RPM) + ' ' + String(-MAX_RPM) + ' ' + String(v[0]) + ' ' + String(v[1]) + ' ' + String(wL) + ' ' + String(wR));
   //Serial.println(String(dt) + ' ' + String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ' + String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
-  //delay(50);
-}
-
-// Function to verify BLE Characteristics
-void verifyCharacteristic(BLECharacteristic *characteristic, char* UUID) {
-  *characteristic = peripheral.characteristic(UUID);
-  if (!*characteristic) {
-    Serial.println("No Characteristic for UUID " + String(UUID));
-    peripheral.disconnect();
-    return;
-  }
 }
 
 // Motor Interrupts from Encoders
@@ -243,6 +144,37 @@ void motorAInterrupt() {
 }
 void motorBInterrupt() {
   motorB.readEncoder();
+}
+
+// Event Handler for Disconnection
+void inrDisconnect(BLEDevice dev) {
+  Serial.println("Disconnected from " + dev.localName() + " at " + dev.address());
+  wL = 0; wR = 0;
+  digitalWrite(LEDR, LOW);
+  digitalWrite(LEDB, HIGH);
+}
+
+// Event Handler for Connection
+void inrConnect(BLEDevice dev) {
+  Serial.println("Connected to " + dev.localName() + " at " + dev.address());
+  digitalWrite(LEDR, HIGH);
+  digitalWrite(LEDB, LOW);
+}
+
+// Event handler for setting wheel speed
+void setSpeedFromBLE(BLEDevice dev, BLECharacteristic omega) {
+  int w[2];
+  omega.readValue(&w, 8);
+  wL = -w[0]; wR = w[1];
+  Serial.println(String(wL) + '\t' + String(wR));
+}
+
+void setPID(BLEDevice dev, BLECharacteristic pid) {
+  float pid_ks[3];
+  pid.readValue(&pid_ks, 12);
+
+  motorA.tunePID(pid_ks[0], pid_ks[1], pid_ks[2]);
+  motorB.tunePID(pid_ks[0], pid_ks[1], pid_ks[2]);
 }
 
 void readIMU() {
@@ -254,6 +186,13 @@ void readIMU() {
     mpu.dmpGetYawPitchRoll(quatsypr+4, &q, &gravity);
     mpu.getMotion6(motion6, motion6+1, motion6+2, motion6+3, motion6+4, motion6+5);
 
+    // Convert from 2 byte ints to standard 4 byte ints for easier conversion in Python
+    int motion6Standard[7];
+    for(int i=0; i<5; i++)
+      motion6Standard[i] = (int) motion6[i];
+    motion6Standard[5] = 39; // 6th value of this characteristic sometimes sends junk in bluepy??? very unsure why. 7th and 5th values are fine
+    motion6Standard[6] = (int) motion6[5];
+
     quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
     orientation[0] = quatsypr[4] * 180/M_PI;
     orientation[1] = quatsypr[5] * 180/M_PI;
@@ -261,10 +200,14 @@ void readIMU() {
 
     quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
     dmpData.writeValue(&quatsypr, 28);
-    rawData.writeValue(&motion6, 12);
+    rawData.writeValue(&motion6Standard, 28);
     
-    bool update = true;
-    updated.writeValue(&update, 1);
+    if(0) {
+      //Serial.print(String(q.w) + ' ' + String(q.x) + ' ' + String(q.y) + ' ' + String(q.z) + ' ');
+      //Serial.print(String(quatsypr[4]) + ' ' + String(quatsypr[5]) + ' ' + String(quatsypr[6]) )+ ' '
+      //Serial.print(String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ');
+      //Serial.println(String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
+    }
   }
   omegaData.writeValue(&v, 8);
 }

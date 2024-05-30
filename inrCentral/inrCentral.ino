@@ -2,28 +2,28 @@
 #include "Joystick.h"
 
 // Constants
-#define MAX_RPM 100
+#define MAX_RPM 150
 #define RAW_DATA_SCALE 16384
 #define pi 3.1415926
 
-// Bluetooth Objects
-BLEService inrStation("b440");
+// Bluetooth UUIDs
+#define DEV_UUID "b440"
+#define OMEGA_UUID "ba89"
+#define OMEGADATA_UUID "c81a"
+#define DMPDATA_UUID "14df"
+#define RAWDATA_UUID "70ce"
+#define HEADINGCONTROL_UUID "289b"
+#define PIDTUNE_UUID "0ef0"
 
-// Indicator Characteristic
-BLECharacteristic updated("cf1a", BLEWrite, 1);
+BLEDevice dev;
+bool scanning = false;
 
-// Characteristic for sending wL/wR to robot
-BLECharacteristic omega("ba89", BLERead, 8);
-
-// Characteristics for receiving data from Robot
-BLECharacteristic omegaData("c81a", BLEWrite | BLENotify | BLEIndicate, 8);
-BLECharacteristic dmpData("14df", BLEWrite | BLENotify | BLEIndicate, 28);
-BLECharacteristic rawData("70ce", BLEWrite | BLENotify | BLEIndicate, 12);
-
-// Special mode characteristics
-BLECharacteristic headingControl("289b", BLERead, 8);
-BLECharacteristic PIDtune("0ef0", BLERead, 12);
-BLEDevice central;
+BLECharacteristic omega;
+BLECharacteristic omegaData;
+BLECharacteristic dmpData;
+BLECharacteristic rawData;
+BLECharacteristic headingControl;
+BLECharacteristic PIDtune;
 
 // Command Tracker
 unsigned long cmdTimer = 0;
@@ -50,8 +50,8 @@ float rawC[6];
 String last;
 
 void setup() {
-  Serial.begin(9600);
-  //while(!Serial);
+  Serial.begin(115200);
+  while(!Serial);
 
   Serial.setTimeout(1);
 
@@ -76,89 +76,74 @@ void setup() {
   }
   if(debugger) Serial.println("BLE Initialized");
 
-  // BLE Setup
-  BLE.setLocalName("receiver");
-  BLE.setAdvertisedService(inrStation);
-
-  inrStation.addCharacteristic(updated);
-  inrStation.addCharacteristic(omega);
-  inrStation.addCharacteristic(omegaData);
-  inrStation.addCharacteristic(dmpData);
-  inrStation.addCharacteristic(rawData);
-  inrStation.addCharacteristic(headingControl);
-  inrStation.addCharacteristic(PIDtune);
-
-
-  BLE.addService(inrStation);
-  BLE.advertise();
-  if(debugger) Serial.println("Setup Complete");
-
   digitalWrite(LEDR, LOW); // low is on, high is off
   digitalWrite(LEDB, HIGH);
 
-  // HEading controller intiialization
+  // Heading controller intiialization
   float href[2]; href[0] = 0;
   headingControl.writeValue(&href, 8);
 }
 
 // Handles bluetooth, calls receiverLoop in normal operation
 void loop() {
-  // Conencted
-  if(central.connected()) {
+  if(dev.connected()) {
     receiverLoop();
   }
-  // Recently Disconnected, central is still assigned but connection failed in last if()
-  else if (central) {
-    if(debugger) Serial.println("Disconnected from Central: " + central.address());
-    central = BLE.central();
-    digitalWrite(LEDB, HIGH);
+  else if (dev) {
+    Serial.println("Disconnected from Central: " + dev.localName());
     digitalWrite(LEDR, LOW);
+    digitalWrite(LEDB, HIGH);
+    dev = BLE.available();
   }
-  // Scanning
   else {
-    if(debugger) Serial.println("Advertising BLE Service");
-    while(!central.connected())
-      central = BLE.central();
+    if(!scanning) {
+      BLE.scanForUuid(DEV_UUID);
+      scanning = true;
+      Serial.println("Scanning...");
+    }
+
+    dev = BLE.available();
+    if(dev) {
+      Serial.println("Found: " + dev.localName());
+      if (dev.localName() != "INR1") return;
+      BLE.stopScan();
+      scanning = false;
+
+      // Verify Connection
+      if(!dev.connect()) {
+        Serial.println("Failed to Connect");
+        return;
+      }
+
+      if(!dev.discoverAttributes()) {
+        Serial.println("Failed to Discover Attributes");
+        dev.disconnect();
+        return;
+      }
+
+      verifyCharacteristic(&omega, OMEGA_UUID);
+      verifyCharacteristic(&omegaData, OMEGADATA_UUID);
+      verifyCharacteristic(&dmpData, DMPDATA_UUID);
+      verifyCharacteristic(&rawData, RAWDATA_UUID);
+      verifyCharacteristic(&headingControl, HEADINGCONTROL_UUID);
+      verifyCharacteristic(&PIDtune, PIDTUNE_UUID);
       
-    
-    if(debugger) Serial.println("Connected to Central: " + central.address());
-    digitalWrite(LEDB, LOW);
-    digitalWrite(LEDR, HIGH);
+      digitalWrite(LEDR, HIGH);
+      digitalWrite(LEDB, LOW);
+      Serial.println("Connection Successful");
+      
+
+      lastLoop = millis();
+    }
   }
 }
 
 void receiverLoop() {
-  unsigned long loopTime = millis(); // Remember current loop's time
-  unsigned long dT = loopTime - lastLoop;
   readData(); // Read and print IMU data to serial
 
-  // Check for active command
-  if(cmdTimer > 0) {
-    if (dT > cmdTimer) {
-      serialCommandControl(dT, w, serCmd, param1, param2, param3, false, true);
-      cmdTimer = 0;
-      param1 = param2 = param3 = 0;
-    }
-    else {
-      cmdTimer -= dT;
-      serialCommandControl(dT, w, serCmd, param1, param2, param3, false, false);
-    }
-  }
-  else if (Serial.available()) {
-
-    // Read in serial command
-    serCmd = Serial.readStringUntil(' ');
-    param1 = Serial.readStringUntil(' ').toFloat();
-    param2 = Serial.readStringUntil(' ').toFloat();
-    param3 = Serial.readStringUntil('\n').toFloat();
-    serialCommandControl(dT, w, serCmd, param1, param2, param3, true, false);
-  }
-  else // Default to joystick control
-    JoystickControl(w);
-
+  // send joystick
+  JoystickControl(w);
   omega.writeValue(&w, 8);
-
-  lastLoop = loopTime; // global record of loop time
 }
 
 // new serial commands entered here
@@ -219,10 +204,8 @@ void JoystickControl(int* w) {
 
 // main loop function that reads and processes data from peripheral
 void readData() {
-  // Read quats
-  //float prevHeading = quatsypr[4];
+  // Read quats, ypr
   dmpData.readValue(&quatsypr, 28);
-  //quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
 
   int16_t rawMotion[6];
   rawData.readValue(&rawMotion, 12);
@@ -231,24 +214,10 @@ void readData() {
 
   float wheelVelocity[2];
   omegaData.readValue(&wheelVelocity, 8);
-  // Raw Accel, raw gyro, quats, ypr
-  String output = printArray(rawC, 6) + ", " + printArray(quatsypr, 7) + ", " + printArray(wheelVelocity, 2);
-  if(output != last) {
-    Serial.println(output);
-    last = output;
-  }
-}
 
-bool dataUpdated() {
-  bool update;
-  updated.readValue(&update, 1);
-  if(update) {
-    update = false;
-    updated.writeValue(&update, 1);
-    return true;
-  }
-  else
-    return false;
+  // Raw Accel, raw gyro, quats, ypr, omega from enc
+  String output = printArray(rawC, 6) + ", " + printArray(quatsypr, 7) + ", " + printArray(wheelVelocity, 2);
+  Serial.println(output);
 }
 
 // helper function prints float array of given length
@@ -258,4 +227,14 @@ String printArray(float* arr, int n) {
   for(int i = 1; i<n; i++)
     result += ", " + String(arr[i]);
   return result;
+}
+
+// Function to verify BLE Characteristics
+void verifyCharacteristic(BLECharacteristic *characteristic, char* UUID) {
+  *characteristic = dev.characteristic(UUID);
+  if (!*characteristic) {
+    Serial.println("No Characteristic for UUID " + String(UUID));
+    dev.disconnect();
+    return;
+  }
 }
