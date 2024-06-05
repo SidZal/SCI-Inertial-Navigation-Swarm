@@ -5,10 +5,8 @@ import cv2.aruco as aruco
 # import math
 import time
 import randompath
-import utilities
+import robotClass
 import calc
-
-
 
 #constants
 DICT_USED = aruco.DICT_6X6_50
@@ -29,7 +27,7 @@ start_time = time.time()
 setRefAngle = False
 refAngle = 0
 
-bot = utilities.INRbot("a6:5d:28:70:b8:e2", ["b440","ba89","c81a","14df","70ce"])
+bot = robotClass.INRbot("a6:5d:28:70:b8:e2", ["b440","ba89","c81a","0ef0"])
 pather = randompath.botPath(bot)
 
 csvfile = open(FILENAME, "a")
@@ -47,6 +45,7 @@ while True:
     if success:
        markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
     else: continue
+
 
     #============= SLOWDOWNS ===========
     # these values should never be used (overridden)
@@ -79,32 +78,40 @@ while True:
             foundCorners = True
         
         for i in range(len(markerIDs)):
-            if((markerIDs[i] != 0) and (markerIDs[i] != 3)):
-               mc = markerCorners[i]
-  
-               ax, ay, az, gx, gy, trash, gz, qw, qx, qy, qz, y, p, r, omegaL, omegaR = bot.getData()
-  
-               xCoor = (m3x - mc[0][0][0]) * xFactor
-               yCoor = (m3y - mc[0][0][1])* yFactor
-  
-            #    x1 = mc[0][0][0]
-            #    y1 = mc[0][0][1]
-            #    x2 = mc[0][1][0]
-            #    y2 = mc[0][1][1]
-            #    x3 = mc[0][2][0]
-            #    y3 = mc[0][2][1]
-            #    x4 = mc[0][3][0]
-            #    y4 = mc[0][3][1]
-  
-               if (setRefAngle == False and markerIDs[i] == 3):
+            if setRefAngle==False and markerIDs[i] == 3:
                 #    refAngle = calc.getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4))
-                    refAngle = calc.getAngle(markerCorners[i])
-                    setRefAngle = True
-  
-               angle = calc.getAngle(markerCorners[i]) - refAngle
-               write.writerow([float(time.time()-start_time), int(markerIDs[i]), ax, ay, az, gx, gy, gz, qw[0], qx[0], qy[0], qz[0], y[0], p[0], r[0], omegaL[0], omegaR[0],  xCoor, yCoor, angle])
-            #============SLOWDOWNS==============
-    
+                refAngle = calc.getAngle(markerCorners[i])
+                setRefAngle = True
+
+            if (markerIDs[i] != 0) and (markerIDs[i] != 3): # exclude reference markers
+                mc = markerCorners[i]
+
+                # Calculate x,y coordinate and angle from Camera Data
+                xCoor = (m3x - mc[0][0][0]) * xFactor
+                yCoor = (m3y - mc[0][0][1])* yFactor
+
+                x1 = mc[0][0][0]
+                y1 = mc[0][0][1]
+                x2 = mc[0][1][0]
+                y2 = mc[0][1][1]
+                x3 = mc[0][2][0]
+                y3 = mc[0][2][1]
+                x4 = mc[0][3][0]
+                y4 = mc[0][3][1]
+
+                angle = calc.getAngle(markerCorners[i]) - refAngle
+
+                # Poll for IMU data and write to CSV if received. 1/30 -> max 30 Hz data
+                # due to bluepy slowing, actual data rate is ~2 Hz :(
+                success, data = bot.getData(1/30)
+                if success:
+                    print(data)
+                    # ax, ay, az, gx, gy, trash, gz, yaw, omegaL, omegaR = data
+                    # write.writerow([float(time.time() - start_time), int(markerIDs[i]),
+                    #                 ax, ay, az, gx, gy, gz,
+                    #                 yaw, omegaL[0], omegaR[0],
+                    #                 xCoor, yCoor, angle])
+
     QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
 
     cv2.imshow('cam', QueryImg)

@@ -18,12 +18,9 @@ BLEService inrService("b440");
 BLECharacteristic omega("ba89", BLEWrite, 8);
 
 // Characteristics for receiving data from Robot
-BLECharacteristic omegaData("c81a", BLERead, 8);
-BLECharacteristic dmpData("14df", BLERead, 28);
-BLECharacteristic rawData("70ce", BLERead, 28);
+BLECharacteristic botData("c81a", BLERead, 36);
 
 // Special mode characteristics
-BLECharacteristic headingControl("289b", BLEWrite, 8);
 BLECharacteristic PIDtune("0ef0", BLEWrite, 12);
 
 //
@@ -56,7 +53,8 @@ int16_t motion6[6];
 #define C2B 4
 
 #define pi 3.1415926
-
+#define RAW_DATA_SCALE 16384
+#define GRAVITATIONAL_ACCEL 9.81
 #define MAX_RPM 100
 
 // Low-Level Speed Control Parameters
@@ -106,10 +104,7 @@ void setup() {
   BLE.setAdvertisedService(inrService);
 
   inrService.addCharacteristic(omega);
-  inrService.addCharacteristic(omegaData);
-  inrService.addCharacteristic(dmpData);
-  inrService.addCharacteristic(rawData);
-  inrService.addCharacteristic(headingControl);
+  inrService.addCharacteristic(botData);
   inrService.addCharacteristic(PIDtune);
 
   BLE.addService(inrService);
@@ -166,12 +161,12 @@ void setSpeedFromBLE(BLEDevice dev, BLECharacteristic omega) {
   int w[2];
   omega.readValue(&w, 8);
   wL = -w[0]; wR = w[1];
-  Serial.println(String(wL) + '\t' + String(wR));
 }
 
 void setPID(BLEDevice dev, BLECharacteristic pid) {
   float pid_ks[3];
   pid.readValue(&pid_ks, 12);
+  Serial.println(String(pid_ks[0]) + '\t' + String(pid_ks[1]) + '\t' + String(pid_ks[2]));
 
   motorA.tunePID(pid_ks[0], pid_ks[1], pid_ks[2]);
   motorB.tunePID(pid_ks[0], pid_ks[1], pid_ks[2]);
@@ -184,23 +179,21 @@ void readIMU() {
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(quatsypr+4, &q, &gravity);
+
     mpu.getMotion6(motion6, motion6+1, motion6+2, motion6+3, motion6+4, motion6+5);
 
-    // Convert from 2 byte ints to standard 4 byte ints for easier conversion in Python
-    int motion6Standard[7];
-    for(int i=0; i<5; i++)
-      motion6Standard[i] = (int) motion6[i];
-    motion6Standard[5] = 39; // 6th value of this characteristic sometimes sends junk in bluepy??? very unsure why. 7th and 5th values are fine
-    motion6Standard[6] = (int) motion6[5];
+    float robotData[9];
+    for(int i=0; i<6; i++)
+      robotData[i] = (float)motion6[i]/RAW_DATA_SCALE * GRAVITATIONAL_ACCEL;
 
     quatsypr[4] = unwrap(prevHeading, quatsypr[4]);
-    orientation[0] = quatsypr[4] * 180/M_PI;
-    orientation[1] = quatsypr[5] * 180/M_PI;
-    orientation[2] = quatsypr[6] * 180/M_PI;
+    robotData[6] = quatsypr[4];
 
-    quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
-    dmpData.writeValue(&quatsypr, 28);
-    rawData.writeValue(&motion6Standard, 28);
+    robotData[7] = v[0];
+    robotData[8] = v[1];
+
+    //quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
+    botData.writeValue(&robotData, 36);
     
     if(0) {
       //Serial.print(String(q.w) + ' ' + String(q.x) + ' ' + String(q.y) + ' ' + String(q.z) + ' ');
@@ -209,7 +202,6 @@ void readIMU() {
       //Serial.println(String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
     }
   }
-  omegaData.writeValue(&v, 8);
 }
 
 // helper function to unwrap two angles
