@@ -7,22 +7,16 @@
 #define pi 3.1415926
 
 // Bluetooth UUIDs
-#define DEV_UUID "b440"
+#define DEV_UUID "8f2f"
 #define OMEGA_UUID "ba89"
-#define OMEGADATA_UUID "c81a"
-#define DMPDATA_UUID "14df"
-#define RAWDATA_UUID "70ce"
-#define HEADINGCONTROL_UUID "289b"
+#define BOTDATA_UUID "c81a"
 #define PIDTUNE_UUID "0ef0"
 
 BLEDevice dev;
 bool scanning = false;
 
 BLECharacteristic omega;
-BLECharacteristic omegaData;
-BLECharacteristic dmpData;
-BLECharacteristic rawData;
-BLECharacteristic headingControl;
+BLECharacteristic botData;
 BLECharacteristic PIDtune;
 
 // Command Tracker
@@ -78,10 +72,6 @@ void setup() {
 
   digitalWrite(LEDR, LOW); // low is on, high is off
   digitalWrite(LEDB, HIGH);
-
-  // Heading controller intiialization
-  float href[2]; href[0] = 0;
-  headingControl.writeValue(&href, 8);
 }
 
 // Handles bluetooth, calls receiverLoop in normal operation
@@ -122,10 +112,7 @@ void loop() {
       }
 
       verifyCharacteristic(&omega, OMEGA_UUID);
-      verifyCharacteristic(&omegaData, OMEGADATA_UUID);
-      verifyCharacteristic(&dmpData, DMPDATA_UUID);
-      verifyCharacteristic(&rawData, RAWDATA_UUID);
-      verifyCharacteristic(&headingControl, HEADINGCONTROL_UUID);
+      verifyCharacteristic(&botData, BOTDATA_UUID);
       verifyCharacteristic(&PIDtune, PIDTUNE_UUID);
       
       digitalWrite(LEDR, HIGH);
@@ -141,9 +128,54 @@ void loop() {
 void receiverLoop() {
   readData(); // Read and print IMU data to serial
 
-  // send joystick
-  JoystickControl(w);
+  if(Serial.available() > 0) {
+    String wheelSpeedCommand = Serial.readStringUntil('\n');
+    if(wheelSpeedCommand[0] == 'P') {
+      float PIDgains[3];
+      stringToFloatArray(PIDgains, 3, wheelSpeedCommand.substring(1, wheelSpeedCommand.length()-1));
+      PIDtune.writeValue(&PIDgains, 12);
+    }
+    else
+      stringToIntArray(w, 2, wheelSpeedCommand)
+  }
+  
+  // JoystickControl(w)
+
   omega.writeValue(&w, 8);
+}
+
+void stringToIntArray(int* arr, int arrLength, String str) {
+  int n = str.length();
+  int j = 0;
+
+  for(int i=0; i<arrLength;i++) {
+    String temp = "";
+    while(j<n && str[j] != ',') {
+      temp += str[j];
+      j++;
+    }
+
+    arr[i] = temp.toInt();
+    j++;
+  }
+
+}
+
+void stringToFloatArray(float* arr, float arrLength, String str) {
+  int n = str.length();
+  int j = 0;
+
+  for(int i=0; i<arrLength;i++) {
+    String temp = "";
+    while(j<n && str[j] != ',') {
+      temp += str[j];
+      j++;
+    }
+
+    arr[i] = temp.toFloat();
+    j++;
+  }
+
 }
 
 // new serial commands entered here
@@ -154,23 +186,6 @@ void serialCommandControl(unsigned long dTmillis, int* w, String serCmd, float c
     if(init) cmdTimer = 5000;
     w[0] = 255;
     w[1] = -255*cmdParam1/10;
-  }
-  else if(serCmd == "heading") {
-    if(init) {cmdTimer = 10000; integrator = 0; previousE = 0;}
-    float href[2];
-    if(fnl) href[0] = 0; else href[0] = 1;
-    href[1] = cmdParam1;
-    headingControl.writeValue(&href, 8);
-    /*
-    float e_deg = cmdParam1 - quatsypr[4]*180/3.1415;
-    integrator += e_deg*dT;
-    float e_der = (e_deg-previousE)/dT;
-    previousE = e_deg;
-    int controlIn = .5*e_deg + .75*integrator + 5*e_der;
-    Serial.println(String(e_deg) + ' ' + String(integrator) + ' ' + String(e_der) + ' ' + String(controlIn));
-    w[0] = -controlIn;
-    w[1] = -controlIn;
-    */
   }
   else if(serCmd == "sineHeading") {
     if(init) cmdTimer = 10000;
@@ -204,19 +219,11 @@ void JoystickControl(int* w) {
 
 // main loop function that reads and processes data from peripheral
 void readData() {
-  // Read quats, ypr
-  dmpData.readValue(&quatsypr, 28);
+  float data[9];
+  botData.readValue(&data, 36);
 
-  int16_t rawMotion[6];
-  rawData.readValue(&rawMotion, 12);
-  for(int rawI = 0; rawI<6; rawI++)
-    rawC[rawI] = 9.81 * (float)rawMotion[rawI]/RAW_DATA_SCALE;
-
-  float wheelVelocity[2];
-  omegaData.readValue(&wheelVelocity, 8);
-
-  // Raw Accel, raw gyro, quats, ypr, omega from enc
-  String output = printArray(rawC, 6) + ", " + printArray(quatsypr, 7) + ", " + printArray(wheelVelocity, 2);
+  // ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR
+  String output = printArray(data, 9);
   Serial.println(output);
 }
 

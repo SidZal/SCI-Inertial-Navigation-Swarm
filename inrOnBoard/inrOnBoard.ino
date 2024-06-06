@@ -13,7 +13,7 @@
 // Bluetooth Variables
 //
 // BLE Service Setup
-BLEService inrService("b440");
+BLEService inrService("8f2f");
 // Characteristic for sending wL/wR to robot
 BLECharacteristic omega("ba89", BLEWrite, 8);
 
