@@ -2,12 +2,12 @@
 #include "Joystick.h"
 
 // Constants
-#define MAX_RPM 150
+#define MAX_RPM 50
 #define RAW_DATA_SCALE 16384
 #define pi 3.1415926
 
 // Bluetooth UUIDs
-#define DEV_UUID "8f2f"
+#define DEV_UUID "b440"
 #define OMEGA_UUID "ba89"
 #define BOTDATA_UUID "c81a"
 #define PIDTUNE_UUID "0ef0"
@@ -35,7 +35,7 @@ Joystick jsB(A1);
 int w[2];
 
 // Print debugging information
-bool debugger = true;
+bool debugger = false;
 
 // IMU Data
 float quatsypr[7];
@@ -80,7 +80,7 @@ void loop() {
     receiverLoop();
   }
   else if (dev) {
-    Serial.println("Disconnected from Central: " + dev.localName());
+    if(debugger) Serial.println("Disconnected from Central: " + dev.localName());
     digitalWrite(LEDR, LOW);
     digitalWrite(LEDB, HIGH);
     dev = BLE.available();
@@ -89,24 +89,24 @@ void loop() {
     if(!scanning) {
       BLE.scanForUuid(DEV_UUID);
       scanning = true;
-      Serial.println("Scanning...");
+      if(debugger)Serial.println("Scanning...");
     }
 
     dev = BLE.available();
     if(dev) {
-      Serial.println("Found: " + dev.localName());
+      if(debugger)Serial.println("Found: " + dev.localName());
       if (dev.localName() != "INR1") return;
       BLE.stopScan();
       scanning = false;
 
       // Verify Connection
       if(!dev.connect()) {
-        Serial.println("Failed to Connect");
+        if(debugger)Serial.println("Failed to Connect");
         return;
       }
 
       if(!dev.discoverAttributes()) {
-        Serial.println("Failed to Discover Attributes");
+        if(debugger)Serial.println("Failed to Discover Attributes");
         dev.disconnect();
         return;
       }
@@ -117,7 +117,7 @@ void loop() {
       
       digitalWrite(LEDR, HIGH);
       digitalWrite(LEDB, LOW);
-      Serial.println("Connection Successful");
+      if(debugger)Serial.println("Connection Successful");
       
 
       lastLoop = millis();
@@ -128,6 +128,7 @@ void loop() {
 void receiverLoop() {
   readData(); // Read and print IMU data to serial
 
+  
   if(Serial.available() > 0) {
     String wheelSpeedCommand = Serial.readStringUntil('\n');
     if(wheelSpeedCommand[0] == 'P') {
@@ -135,11 +136,10 @@ void receiverLoop() {
       stringToFloatArray(PIDgains, 3, wheelSpeedCommand.substring(1, wheelSpeedCommand.length()-1));
       PIDtune.writeValue(&PIDgains, 12);
     }
-    else
-      stringToIntArray(w, 2, wheelSpeedCommand)
+    //else
+      //stringToIntArray(w, 2, wheelSpeedCommand);
   }
-  
-  // JoystickControl(w)
+  JoystickControl(w);
 
   omega.writeValue(&w, 8);
 }
@@ -213,8 +213,8 @@ void JoystickControl(int* w) {
   if(abs(wf_R)>1)
     wf_R /= abs(wf_R);
 
-  w[0] = wf_L*MAX_RPM; // wL
-  w[1] = wf_R*MAX_RPM; // wR
+  w[0] = -wf_L*MAX_RPM; // wL
+  w[1] = -wf_R*MAX_RPM; // wR
 }
 
 // main loop function that reads and processes data from peripheral

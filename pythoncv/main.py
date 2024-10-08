@@ -99,7 +99,7 @@ with open(FILENAME, "a") as csvfile:
                 line = re.sub(r"\s+", '', line)
                 list = line.split(',', 12)
                 if (len(list) == 13):
-                    ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r, omegaR, omegaL = line.split(',', 14)
+                    ax, ay, az, gx, gy, gz, y, omegaR, omegaL = line.split(',', 8)
 
                 xCoor = (m3x - mc[0][0][0]) * xFactor
                 yCoor = (m3y - mc[0][0][1])* yFactor
