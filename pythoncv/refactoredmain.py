@@ -5,7 +5,7 @@ import cv2.aruco as aruco
 # import math
 import time
 import randompath
-import robotClass
+import robotClassSerial
 import calc
 
 #constants
@@ -27,7 +27,7 @@ start_time = time.time()
 setRefAngle = False
 refAngle = 0
 
-bot = robotClass.INRbot("a6:5d:28:70:b8:e2", ["b440","ba89","c81a","0ef0"])
+bot = robotClassSerial.INRbot("a6:5d:28:70:b8:e2", ["b440","ba89","c81a","0ef0"])
 pather = randompath.botPath(bot)
 
 csvfile = open(FILENAME, "a")

@@ -4,7 +4,7 @@ import numpy as np
 import math
 import time
 import serial
-import BotWriter
+import botwrite
 
 #returns unit vector
 def unit_vector(vector):
@@ -52,7 +52,7 @@ ser = serial.Serial(port='/dev/tty.usbmodem11201', baudrate=9600)
 idList = []
 botDict = {}
 for i in idList:
-    botDict[i] = BotWriter(i)
+    botDict[i] = botwrite(i)
     
 while True:
     success, frame = cap.read()
