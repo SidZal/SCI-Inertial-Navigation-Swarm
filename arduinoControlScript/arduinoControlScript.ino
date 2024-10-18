@@ -9,14 +9,14 @@
 // UUIDs defined by cart script
 #define CART_UUID "bac3"
 #define DATA_UUID "78d3"
-#define COMMAND_UUID "2bef"
+//#define COMMAND_UUID "2bef"
 
 // Global variables for BLE tracking
 BLEDevice dev;
 bool scanning = false;
 
 BLECharacteristic sensorData;
-BLECharacteristic wheelRef;
+//BLECharacteristic wheelRef;
 
 long lastMillis = millis();
 
@@ -49,18 +49,15 @@ void loop() {
   if(!connectedScan()) return;
 
   // Normal Operation
-  //if(sensorData.valueUpdated()) {
+  if(sensorData.valueUpdated()) {
     float data[9];
     sensorData.readValue(&data, 36);
-    Serial.println(String((int) data[0]) + " " + String((int) data[8]));
-  //}
-
-  if(wheelRef.canWrite()) {
-    int wheelSpeeds[2];
-    JoystickControl(wheelSpeeds, 255);
-    //Serial.println(String(wheelSpeeds[0]) + ' ' + String(wheelSpeeds[1]));
-    wheelRef.writeValue(&wheelSpeeds, 8);
+    Serial.println(String(data[0]) + ' ' + String(data[1]) + ' ' + String(data[2]) + String(data[8]));
   }
+  int wheelSpeeds[2];
+  JoystickControl(wheelSpeeds, 255);
+  //Serial.println(String(wheelSpeeds[0]) + ' ' + String(wheelSpeeds[1]));
+  //sensorData.writeValue(&wheelSpeeds, 8);
   
   
     
@@ -131,14 +128,14 @@ bool connectedScan() {
       }
 
       verifyCharacteristic(&sensorData, DATA_UUID);
-      verifyCharacteristic(&wheelRef, COMMAND_UUID);
+      //verifyCharacteristic(&wheelRef, COMMAND_UUID);
       
       if(!sensorData.canSubscribe()) {
         Serial.println("Cannot subscribe");
         dev.disconnect();
         return false;
       }
-      //sensorData.subscribe();
+      sensorData.subscribe();
       
       connectionLED();
       Serial.println("Connection Successful");

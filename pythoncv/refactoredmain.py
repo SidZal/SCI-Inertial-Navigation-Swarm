@@ -1,20 +1,28 @@
 import csv
 import cv2
 import cv2.aruco as aruco
-# import numpy as np
-# import math
 import time
-import randompath
-import robotClassSerial
 import calc
+import asyncio
+import numpy as np
+from robotClassBleak import Cart
+import robotClassBluePy
+from bleak import BleakClient
+import struct
+
 
 #constants
 DICT_USED = aruco.DICT_6X6_50
-WINDOW_WIDTH = 700 #pixelsπ
+WINDOW_WIDTH = 700#pixelsπ
 WINDOW_HEIGHT = 550
 X_DIST = 40
 Y_DIST = 50
-FILENAME = "./test2.csv"
+
+ORIGIN_ID = 0
+REFERENCE_ID = 3
+
+timestr = time.strftime("%Y%m%d-%H%M%S")
+FILENAME = f"../.generateddata/{timestr}.csv"
 
 dictionary = aruco.getPredefinedDictionary(DICT_USED)
 parameters = aruco.DetectorParameters()
@@ -23,108 +31,134 @@ detector = aruco.ArucoDetector(dictionary, parameters)
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WINDOW_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG")) # add this line
 start_time = time.time()
 setRefAngle = False
 refAngle = 0
+print(cv2.cuda.getCudaEnabledDeviceCount())
 
-bot = robotClassSerial.INRbot("a6:5d:28:70:b8:e2", ["b440","ba89","c81a","0ef0"])
-pather = randompath.botPath(bot)
+bot = robotClassBluePy.INRbot("a6:5d:28:70:b8:e2", ["bac3","78d3","2bef"])
+#pather = randompath.botPath(bot)
+
+# # 2D array for each cart: address, service UUID, wheel Reference UUID, sensor UUID
+# cartIDs = [["a6:5d:28:70:b8:e2", "bac3", "2bef", "78d3"]]
+# #a6:5d:28:70:b8:e2 arduino address on cart
+# #f7:ae:59:0b:bf:08 arduino address on breadboard
+# print(cartIDs[0])
+# # TODO: dynamically create array of cart objects given length of cartIDS
+# cart1 = Cart(cartIDs[0])
+
+def wheel_ref_to_bytes(omega_left, omega_right):
+    return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
+
+
+# def sensor_notification(cartUUID, data):
+#     #print("Notified")
+#     if newData:
+#         global start_time
+#         print(time.time()-start_time)
+#         print(list(struct.iter_unpack('f', data)))
+#         newData = False
+
+
 
 csvfile = open(FILENAME, "a")
 write = csv.writer(csvfile)
-
+newData = False
+xCoor = 0.
+yCoor = 0.
+angle = 0.
 count = 5
 num = 0
 
-foundCorners = False
 
-while True:
+async def main():
+    # client = BleakClient(cart1.address)
+    # await client.connect()
+    foundCorners = False
+    setRefAngle = False
 
-    success, frame = cap.read()
+    #await client.start_notify(cart1.sensor, sensor_notification)
+    while True:
+        success, frame = cap.read()
 
-    if success:
-       markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
-    else: continue
+        if success:
+           markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
+        else:
+            continue
 
+        if markerIDs is not None:
+            origin_index = reference_index = -1
 
-    #============= SLOWDOWNS ===========
-    # these values should never be used (overridden)
-    mX = mY = mx1 = my1 = centerX = centerY = float(-1.0)
-    xFactor = yFactor = 1
-  
-    if markerIDs is not None:
-        index0 = index3 = -1
+            # get reference markers
+            for i in range(len(markerIDs)):
+                if (origin_index != -1 and reference_index != -1): break
+                if (markerIDs[i] == ORIGIN_ID):
+                    origin_index = i
+                    continue
+                elif (markerIDs[i] == REFERENCE_ID):
+                    reference_index = i
+                    continue
 
-        #get reference markers
-        for i in range(len(markerIDs)):
-            if (index0 != -1 and index3 != -1): break
-            if (markerIDs[i] == 0):
-                index0 = i
-                continue
-            elif (markerIDs[i] == 3):
-                index3 = i
-                continue
-  
-        if foundCorners != True: #only execute once
-            m0x = markerCorners[index0][0][0][0]
-            m0y = markerCorners[index0][0][0][1]
-            m3x = markerCorners[index3][0][0][0]
-            m3y = markerCorners[index3][0][0][1]
-  
-            if ((m3x - m0x) != 0 and (m3y - m0y) != 0):
-                xFactor = X_DIST/(m3x - m0x)
-                yFactor = Y_DIST/(m3y - m0y)
-            
-            foundCorners = True
-        
-        for i in range(len(markerIDs)):
-            if setRefAngle==False and markerIDs[i] == 3:
-                #    refAngle = calc.getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4))
-                refAngle = calc.getAngle(markerCorners[i])
-                setRefAngle = True
+            if origin_index != -1 and reference_index != -1 and not foundCorners:
+                global m0x
+                m0x = markerCorners[origin_index][0][0][0]
+                global m0y
+                m0y = markerCorners[origin_index][0][0][1]
+                m3x = markerCorners[reference_index][0][0][0]
+                m3y = markerCorners[reference_index][0][0][1]
 
-            if (markerIDs[i] != 0) and (markerIDs[i] != 3): # exclude reference markers
-                mc = markerCorners[i]
+                dist_x = m3x - m0x
+                dist_y = m3y - m0y
 
-                # Calculate x,y coordinate and angle from Camera Data
-                xCoor = (m3x - mc[0][0][0]) * xFactor
-                yCoor = (m3y - mc[0][0][1])* yFactor
+                if dist_x != 0 and dist_y != 0:
+                    print("Factors Calculated")
+                    xFactor = X_DIST / dist_x
+                    yFactor = Y_DIST / dist_y
+                    foundCorners = True
+                    print(f"Scaling Factors - X: {xFactor} cm/pixel, Y: {yFactor} cm/pixel")
 
-                x1 = mc[0][0][0]
-                y1 = mc[0][0][1]
-                x2 = mc[0][1][0]
-                y2 = mc[0][1][1]
-                x3 = mc[0][2][0]
-                y3 = mc[0][2][1]
-                x4 = mc[0][3][0]
-                y4 = mc[0][3][1]
+            for i in range(len(markerIDs)):
+                if setRefAngle == False and markerIDs[i] == ORIGIN_ID:
+                    print("Ref Angle Calculated")
+                    refAngle = calc.getAngle(markerCorners[i]) - np.radians(90)
+                    setRefAngle = True
 
-                angle = calc.getAngle(markerCorners[i]) - refAngle
+                if (markerIDs[i] != ORIGIN_ID) and (markerIDs[i] != REFERENCE_ID) and setRefAngle and foundCorners:
+                    mc = markerCorners[i]
 
-                # Poll for IMU data and write to CSV if received. 1/30 -> max 30 Hz data
-                # due to bluepy slowing, actual data rate is ~2 Hz :(
-                success, data = bot.getData(1/30)
-                if success:
-                    print(data)
-                    # ax, ay, az, gx, gy, trash, gz, yaw, omegaL, omegaR = data
-                    # write.writerow([float(time.time() - start_time), int(markerIDs[i]),
-                    #                 ax, ay, az, gx, gy, gz,
-                    #                 yaw, omegaL[0], omegaR[0],
-                    #                 xCoor, yCoor, angle])
+                    # Get the center of the third marker (agent)
+                    centerX = np.mean(mc[0][:, 0])
+                    centerY = np.mean(mc[0][:, 1])
 
-    QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
+                    xCoor = (centerX - m0x) * xFactor  # Corrected scaling
+                    yCoor = (centerY - m0y) * yFactor  # Corrected scaling
 
-    cv2.imshow('cam', QueryImg)
+                    angle = calc.getAngle(markerCorners[i]) - refAngle
 
-    if cv2.waitKey(1) & 0xFF == ord('q'): #press 'q' to quit
-       break
+                    #print(f"Real-World Position - X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm")
+                    #print(f"Orientation Angle: {np.degrees(angle):.2f}°")
 
-    num += 1
-    if num == count:
-       pather.takePath()
-       num = 0
-    else:
-       time.sleep(0.1)
+                    # Poll for IMU data and write to CSV if received. 1/60 -> max 60 Hz data
+                    success, data = bot.receiveNotification(1/60)
+                    if success:
+                        #print(data)
+                        ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
 
-cv2.destroyAllWindows()
-cap.release()
+                        timeSinceStart = time.time() - start_time
+                        print(f"Logging Data. Time: {timeSinceStart}")
+                        write.writerow([timeSinceStart, int(markerIDs[i]),
+                                        ax, ay, az, gx, gy, gz,
+                                        yaw, omegaL, omegaR,
+                                        xCoor, yCoor, angle])
+
+        QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
+        cv2.imshow('cam', QueryImg)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'): #press 'q' to quit
+           break
+
+    cv2.destroyAllWindows()
+    cap.release()
+
+asyncio.run(main())
