@@ -38,7 +38,6 @@ refAngle = 0
 print(cv2.cuda.getCudaEnabledDeviceCount())
 
 bot = robotClassBluePy.INRbot("a6:5d:28:70:b8:e2", ["bac3","78d3","2bef"])
-#pather = randompath.botPath(bot)
 
 # # 2D array for each cart: address, service UUID, wheel Reference UUID, sensor UUID
 # cartIDs = [["a6:5d:28:70:b8:e2", "bac3", "2bef", "78d3"]]
@@ -139,7 +138,7 @@ async def main():
                     #print(f"Real-World Position - X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm")
                     #print(f"Orientation Angle: {np.degrees(angle):.2f}°")
 
-                    # Poll for IMU data and write to CSV if received. 1/60 -> max 60 Hz data
+                    # Poll for IMU data and write to CSV if received. 1/X -> max X Hz data
                     success, data = bot.receiveNotification(1/60)
                     if success:
                         #print(data)
