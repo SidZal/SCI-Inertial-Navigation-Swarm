@@ -1,2 +1,2 @@
-# ignore all . folders but include . files
-.*/
+# ignore all . files and . folders
+.*
