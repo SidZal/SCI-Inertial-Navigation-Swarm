@@ -1,150 +1,138 @@
 import csv
 import cv2
 import cv2.aruco as aruco
-import numpy as np
-import math
 import time
-import serial
-import re
-import serial.tools.list_ports
+import calc
+import asyncio
+import numpy as np
+import robotClassBluePy
 
-#returns unit vector
-def unit_vector(vector):
-    return vector / np.linalg.norm(vector)
 
-#input as floats, angle as radians
-def getAngle(x1, y1, x2, y2, x3, y3, x4, y4): 
-    mx1 = (x1 + x2)/ 2.0
-    my1 = (y1 + y2) / 2.0
-    mx2 = (x3 + x4) / 2.0
-    my2 = (y3 + y4) / 2.0
-    mX = (x3 + x4) / 2.0
-    mY = (y3 + y4) / 2.0
-    centerX = (mx1 + mx2)/ 2.0
-    centerY = (my1 + my2) / 2.0
-    
-    v1 = unit_vector([centerX-mX, centerY-mY])
-    v2 = unit_vector([-1, 0])
-    angle = np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
-    
-    if mY - centerY > 0: 
-        return 2 * math.pi - angle
-
-    return angle
-    
-#constants
-DICT_USED = aruco.DICT_6X6_50
-WINDOW_WIDTH = 700 #pixelsπ
+# Width/Height dictates window size and resolution OpenCV will analyze
+WINDOW_WIDTH = 700
 WINDOW_HEIGHT = 550
+
+# ArUco Reference Markers
+ORIGIN_ID = 0
 X_DIST = 40
 Y_DIST = 50
-FILENAME = "./test1.csv"
+REFERENCE_ID = 3
 
-# print(list(serial.tools.list_ports.comports()))
+# Open file for data logging
+timestr = time.strftime("%Y%m%d-%H%M%S")
+FILENAME = f"../.generateddata/{timestr}.csv"
 
+# OpenCV / ArUco Parameters
+DICT_USED = aruco.DICT_6X6_50
 dictionary = aruco.getPredefinedDictionary(DICT_USED)
 parameters = aruco.DetectorParameters()
 detector = aruco.ArucoDetector(dictionary, parameters)
 
+# Load camera
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WINDOW_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
-start_time = time.time()
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG")) # changes codec to allow real-time video capture
+print(cv2.cuda.getCudaEnabledDeviceCount()) # 0 -> integrated graphics, >0 -> GPU-enabled
+
+# ec:62:60:8e:60:16
+# a6:5d:28:70:b8:e2
+bot = robotClassBluePy.INRbot("ec:62:60:8e:60:16", ["bac3","78d3","2bef"])
+
 setRefAngle = False
 refAngle = 0
+start_time = time.time()
 
-with open(FILENAME, "a") as csvfile:
-    write = csv.writer(csvfile)
+csvfile = open(FILENAME, "a")
+write = csv.writer(csvfile)
+
+
+def wheel_ref_to_bytes(omega_left, omega_right):
+    return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
+
+
+async def main():
+    foundCorners = False
+    setRefAngle = False
 
     while True:
         success, frame = cap.read()
-        ser = serial.Serial(port='/dev/ttyACM0', baudrate=9600)
-
-        # ser.write(bytes("circle 2", 'utf-8'))
-
 
         if success:
-            markerCorners, markerIDs, rejectedCandidates = detector.detectMarkers(frame)
-
-        #these values should never be used (overridden)
-        mX = mY = mx1 = my1 = centerX = centerY = float(-1.0)
-        xFactor = yFactor = 1
+           markerCorners, markerIDs, _ = detector.detectMarkers(frame)
+        else:
+            continue
 
         if markerIDs is not None:
-            index0 = index3 = -1
+            origin_index = reference_index = -1
 
-            #get reference markers
+            # Check for reference markers
             for i in range(len(markerIDs)):
-                if (markerIDs[i] == 0):
-                    index0 = i
+                if origin_index != -1 and reference_index != -1: break
+                if markerIDs[i] == ORIGIN_ID:
+                    origin_index = i
                     continue
-                if (markerIDs[i] == 3):
-                    index3 = i
+                elif markerIDs[i] == REFERENCE_ID:
+                    reference_index = i
                     continue
 
-            m0x = markerCorners[index0][0][0][0]
-            m0y = markerCorners[index0][0][0][1]
-            m3x = markerCorners[index3][0][0][0]
-            m3y = markerCorners[index3][0][0][1]
+            # Record corner references if they have not been recorded
+            if not foundCorners and origin_index != -1 and reference_index != -1:
+                m0x = markerCorners[origin_index][0][0][0]
+                m0y = markerCorners[origin_index][0][0][1]
+                m3x = markerCorners[reference_index][0][0][0]
+                m3y = markerCorners[reference_index][0][0][1]
 
-            if ((m3x - m0x) != 0 and (m3y - m0y) != 0):
-                xFactor = X_DIST/(m3x - m0x)
-                yFactor = Y_DIST/(m3y - m0y)
+                dist_x = m3x - m0x
+                dist_y = m3y - m0y
+
+                if dist_x != 0 and dist_y != 0:
+                    xFactor = X_DIST / dist_x
+                    yFactor = Y_DIST / dist_y
+                    print(f"Scaling Factor X: {xFactor} cm/pixel, Y: {yFactor} cm/pixel")
+
+                    refAngle = calc.get_angle(markerCorners[origin_index]) - np.radians(90)
+                    print(f"Reference Angle: {np.degrees(refAngle)}°")
+
+                    foundCorners = True
 
             for i in range(len(markerIDs)):
-                mc = markerCorners[i]
+                if foundCorners and markerIDs[i] not in [ORIGIN_ID, REFERENCE_ID]:
+                    mc = markerCorners[i]
 
-                # joystick = "doesn't work"
-                line = ((ser.readline()).decode('utf-8'))
-                line = re.sub(r"\s+", '', line)
-                list = line.split(',', 12)
-                if (len(list) == 13):
-                    ax, ay, az, gx, gy, gz, y, omegaR, omegaL = line.split(',', 8)
+                    # Get the center of the third marker (agent)
+                    centerX = np.mean(mc[0][:, 0])
+                    centerY = np.mean(mc[0][:, 1])
 
-                xCoor = (m3x - mc[0][0][0]) * xFactor
-                yCoor = (m3y - mc[0][0][1])* yFactor
+                    # Find pixel difference between origin and bot, scale to cm
+                    xCoor = (centerX - m0x) * xFactor
+                    yCoor = (centerY - m0y) * yFactor
 
-                x1 = mc[0][0][0]
-                y1 = mc[0][0][1]
-                x2 = mc[0][1][0]
-                y2 = mc[0][1][1]
-                x3 = mc[0][2][0]
-                y3 = mc[0][2][1]
-                x4 = mc[0][3][0]
-                y4 = mc[0][3][1]
+                    angle = calc.get_angle(markerCorners[i]) - refAngle
 
-                if (setRefAngle == False and markerIDs[i] == 3):
-                    refAngle = getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4))
-                    setRefAngle = True
+                    # print(f"X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm, Orientation: {np.degrees(angle):.2f}°")
 
-                angle = getAngle(float(x1), float(y1), float(x2), float(y2), float(x3), float(y3), float(x4), float(y4)) - refAngle
+                    # Poll for IMU data and write to CSV if received. 1/X -> max X Hz data
+                    success, data = bot.receiveNotification(1/60)
+                    if success:
+                        #print(data)
+                        ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
 
-                if ((markerIDs[i] != 0) and (markerIDs[i] != 3)):
-                    write.writerow([float(time.time()-start_time), int(markerIDs[i]), ax, ay, az, gx, gy, gz, qw, qx, qy, qz, y, p, r, omegaR, omegaL, xCoor, yCoor, angle])
+                        timeSinceStart = time.time() - start_time
+                        print(f"Time: {timeSinceStart:.3f}")
+                        write.writerow([timeSinceStart, int(markerIDs[i]),
+                                        ax, ay, az, gx, gy, gz,
+                                        yaw, omegaL, omegaR,
+                                        xCoor, yCoor, angle])
 
-        QueryImg = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
+        marked_img = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
+        cv2.imshow('cam', marked_img)
 
-        cv2.imshow('cam', QueryImg)
+        # 'Q' to end program
+        if cv2.pollKey() & 0xFF == ord('q'):
+           break
 
-        if cv2.waitKey(1) & 0xFF == ord('q'): #press 'q' to quit
-            break
+    cv2.destroyAllWindows()
+    cap.release()
 
-        ser.close()
-
-cap.release()
-cv2.destroyAllWindows()
-
-# rvecs = []
-# tvecs = []
-
-# QueryImg = cv2.line(QueryImg, (int(mX), int(mY)), (int(centerX), int(centerY)), (255,0,0),5)
-
-    # markerPoints = np.array([[-MARKER_SIZE / 2, MARKER_SIZE / 2, 0],
-    #                           [MARKER_SIZE / 2, MARKER_SIZE / 2, 0],
-    #                           [MARKER_SIZE / 2, -MARKER_SIZE / 2, 0],
-    #                           [-MARKER_SIZE / 2, -MARKER_SIZE / 2, 0]], dtype=np.float32)
-
-    # for c in markerCorners:
-    #     trash, R, t = cv2.solvePnP(markerPoints, c, mtx, distortion) #todo: camera distortion
-    #     rvecs.append(R)
-    #     tvecs.append(t)
+asyncio.run(main())

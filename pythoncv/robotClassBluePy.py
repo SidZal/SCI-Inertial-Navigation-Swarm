@@ -41,17 +41,18 @@ class INRbot:
     #     gain_byte_array = struct.pack('f', kp) + struct.pack('f', ki) + struct.pack('f', kd)
     #     self.PID.write(gain_byte_array, True)
 
-    def setWheelSpeed(self, timeout, wL, wR):
+    def setWheelSpeed(self, wL, wR):
         omega_byte_array = wL.to_bytes(4, 'little', signed=True) + wR.to_bytes(4, 'little', signed=True)
+        self.omegaChar.write(omega_byte_array, False)
 
-        signal.signal(signal.SIGALRM, self.dataTimeoutHandler)
-        signal.setitimer(signal.ITIMER_REAL, timeout)
-
-        try:
-            self.omegaChar.write(omega_byte_array, True)
-            signal.setitimer(signal.ITIMER_REAL, 0)
-        except Exception as exc:
-            signal.setitimer(signal.ITIMER_REAL, 0)
+        # signal.signal(signal.SIGALRM, self.dataTimeoutHandler)
+        # signal.setitimer(signal.ITIMER_REAL, timeout)
+        #
+        # try:
+        #     self.omegaChar.write(omega_byte_array, True)
+        #     signal.setitimer(signal.ITIMER_REAL, 0)
+        # except Exception as exc:
+        #     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
     def manualReadData(self, timeout):

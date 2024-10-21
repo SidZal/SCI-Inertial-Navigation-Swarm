@@ -20,7 +20,7 @@
 BLEService cartData("bac3");
 BLECharacteristic sensorReadings("78d3", BLERead | BLENotify | BLEWrite, 36);
 BLECharacteristic wheelRef("2bef", BLEWrite | BLEWriteWithoutResponse, 8);
-
+const int ledPin = LED_BUILTIN; // pin to use for the LED
 
 // IMU Variables
 MPU6050 mpu;
@@ -62,7 +62,7 @@ int wheelVelocityTarget[2];
 
 void setup() {
   Serial.begin(115200);
-  //while(!Serial);
+  while(!Serial);
 
   // Motor setup: interrupts for encoders, standby turns on motor controller
   attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
@@ -79,6 +79,12 @@ void setup() {
 void loop() {
   // Poll: waits for BLE events (connection/disconnection/write)
   BLE.poll();
+
+  // float noise[9];
+  // for (int i=0; i<9; i++) {
+  //   noise[i] = (float) (10*random());
+  // }
+  // sensorReadings.writeValue(noise, 36);
 
   if (Serial.available() > 0) {
     Serial.readStringUntil('\n');
@@ -153,6 +159,9 @@ void loop() {
 void setupBLE() {
   Serial.println("Initializing BLE Service");
 
+  // set LED pin to output mode: off = no connection
+  pinMode(ledPin, OUTPUT);
+
   if(!BLE.begin()) {
     Serial.println("Failed to initialize BLE");
     while(1);
@@ -165,7 +174,7 @@ void setupBLE() {
   BLE.addService(cartData);
 
   // Start LED disconnected
-  disconnectionLED();
+  digitalWrite(ledPin, LOW);  
 
   // Set event handlers, to be called if event occurs during BLE.poll()
   BLE.setEventHandler(BLEConnected, cartConnected);
@@ -257,11 +266,11 @@ void readIMU() {
 // BLE Event Handlers
 void cartConnected(BLEDevice dev) {
   Serial.println("Connected to " + dev.address());
-  connectionLED();
+  digitalWrite(ledPin, HIGH);  
 }
 void cartDisconnected(BLEDevice dev) {
   Serial.println("Disconnected from " + dev.address());
-  disconnectionLED();
+  digitalWrite(ledPin, LOW);  
 }
 void wheelHandler(BLEDevice dev, BLECharacteristic characteristic) {
   int omega[2];
@@ -269,16 +278,6 @@ void wheelHandler(BLEDevice dev, BLECharacteristic characteristic) {
   Serial.println(String(omega[0]) + " " + String(omega[1]));
 }
 
-
-// LED Handlers: For Nano 33 BLE, HIGH is off, LOW is on
-void connectionLED() {
-  digitalWrite(LEDR, HIGH);
-  digitalWrite(LEDB, LOW);
-}
-void disconnectionLED() {
-  digitalWrite(LEDR, LOW);
-  digitalWrite(LEDB, HIGH);
-}
 
 // Motor Interrupts from Encoders
 void motorAInterrupt() {
