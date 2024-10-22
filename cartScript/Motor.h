@@ -17,6 +17,8 @@ public:
   // Expects +/- RPM inputs, for closed-loop PID control, returns velocity reading
   float feedbackStep(float ref);
 
+  void initFeedback();
+
   void readEncoder();
   void tunePID(float kp, float ki, float kd);
 

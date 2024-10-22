@@ -24,14 +24,10 @@ Motor::Motor(int in1, int in2, int PWM, int C1, int C2, float encConvRatio) {
   this->dir = true;
   //analogWrite(PWM, 0); // This line ensures cosntant 0 PWM output on nano 33 ble, not sure why
 
-  // Feedback Parameters
-  prevT = prevT_i = 0; // long
-  posPrev = pos_i = 0; // int
-  velocity_i = v1Filt = v1Prev = v2Filt = v2Prev = eintegral = prevE = 0; // float
+  this->initFeedback();
 
-  kp = 1;
-  ki = 3;
-  kd = .2;
+  // Use tune in main script on per-motor basis
+  kp=ki=kd=0;
 }
 
 void Motor::setPWM(int newPWM){
@@ -112,6 +108,13 @@ void Motor::tunePID(float kp, float ki, float kd) {
   this->kp = kp;
   this->ki = ki;
   this->kd = kd;
+}
+
+void Motor::initFeedback() {
+  // Feedback Parameters
+  prevT = prevT_i = micros(); // long
+  posPrev = pos_i = 0; // int
+  velocity_i = v1Filt = v1Prev = v2Filt = v2Prev = eintegral = prevE = 0; // float
 }
 
 float Motor::lowPassFilter(float calc, float prevCalc, float prevFilt) {

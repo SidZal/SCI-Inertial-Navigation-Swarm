@@ -35,8 +35,8 @@ int16_t motion6[6];
 
 // Motor Pins
 #define PWMA 6
-#define in1 8
-#define in2 7
+#define in1 7
+#define in2 8
 #define C1A 3
 #define C2A 5
 
@@ -51,9 +51,9 @@ int16_t motion6[6];
 // Low-Level Speed Control Parameters
 #define MAX_RPM 30
 const float countsPerRotation = 3;
-const float gearRatio = 298;
+const float gearRatio = 1000;
 const float conversionRatio = 1./countsPerRotation*60/gearRatio;
-float kp,ki,kd;
+float kp[2],ki[2],kd[2];
 Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
 Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 float wheelVelocity[2];
@@ -67,10 +67,13 @@ void setup() {
   // Motor setup: interrupts for encoders, standby turns on motor controller
   attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(C1B), motorBInterrupt, RISING);
+
+  // Set default motor tunes (PER MOTOR BASIS)
   digitalWrite(MOTOR_STANDBY, HIGH);
-  kp=15; ki=15; kd=0.01;
-  motorA.tunePID(kp,ki,kd);
-  motorB.tunePID(kp,ki,kd);
+  kp[0]=30; ki[0]=150; kd[0]=0.3;
+  kp[1]=0; ki[1]=0; kd[1]=0;
+  motorA.tunePID(kp[0],ki[0],kd[0]);
+  motorB.tunePID(kp[1],ki[1],kd[1]);
 
   setupIMU();
   setupBLE();
@@ -86,46 +89,15 @@ void loop() {
   // }
   // sensorReadings.writeValue(noise, 36);
 
-  if (Serial.available() > 0) {
-    Serial.readStringUntil('\n');
-    motorA.setPWM(0);
-    motorB.setPWM(0);
-    Serial.println("Stopped");
-    Serial.println(String(kp)+'\t'+String(ki)+'\t'+String(kd));
-    Serial.print("Please enter new (K_p) or (skip): ");
-    while(Serial.available() == 0);
-    String userInput = Serial.readStringUntil('\n');
-    if(userInput == "skip") {
-      Serial.println("skip... continuing");
-    }
-    else {
-      Serial.println(userInput);
-      kp = userInput.toFloat();
-
-      Serial.print("Please enter new (K_i): ");
-      while(Serial.available() == 0);
-      userInput = Serial.readStringUntil('\n');
-      Serial.println(userInput);
-      ki = userInput.toFloat();
-
-      Serial.print("Please enter new (K_d): ");
-      while(Serial.available() == 0);
-      userInput = Serial.readStringUntil('\n');
-      Serial.println(userInput);
-      kd = userInput.toFloat();
-      
-      motorA.tunePID(kp, ki, kd);
-      motorB.tunePID(kp, ki, kd);
-      Serial.println("Tuned... continuing");
-    }
-  }
+  if (Serial.available() > 0)
+    serialTuner();
 
   // TEMP: On-board Predetermined Control
-  int cycle = 30000;
+  int cycle = 10000;
   int rest = 2000;
   int time = millis() % cycle;
   
-  int targetVal = 20;
+  int targetVal = 15;
   if(time < cycle/2 - rest) {
     wheelVelocityTarget[0] = -targetVal; // L
     wheelVelocityTarget[1] = targetVal; // R
@@ -150,10 +122,43 @@ void loop() {
   wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
   wheelVelocity[1] = motorB.feedbackStep(wheelVelocityTarget[1]);
 
-  Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"100  -100");
+  Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"35  -35");
 
   readIMU();
 }
+
+// Serial Menu for Tuning
+void serialTuner() {
+  Serial.println("Stopping...");
+  motorA.setPWM(0);
+  motorB.setPWM(0);
+
+  String userInput = Serial.readStringUntil('\n');
+  if (userInput == "0" || userInput == "1") {
+    int mtr = userInput.toInt();
+    Serial.println("Motor " +userInput+ " Tune: " +String(kp[mtr])+ "\t" +String(ki[mtr])+ "\t" +String(kd[mtr]));
+    kp[mtr] = serialTunerInputHelper("k_p");
+    ki[mtr] = serialTunerInputHelper("k_i");
+    kd[mtr] = serialTunerInputHelper("k_d");
+
+    if(mtr) motorB.tunePID(kp[1], ki[1], kd[1]);
+    else motorA.tunePID(kp[0], ki[0], kd[0]);
+  }
+
+  Serial.println("Continuing...");
+  delay(1000);
+  motorA.initFeedback();
+  motorB.initFeedback();
+}
+
+float serialTunerInputHelper(String prop) {
+  Serial.print("Please enter new (" + prop + "): ");
+  while(Serial.available() == 0);
+  String helperInput = Serial.readStringUntil('\n');
+  Serial.println(helperInput.toFloat());
+  return helperInput.toFloat();
+}
+
 
 // BLE Shorthands
 void setupBLE() {
