@@ -37,7 +37,8 @@ print(cv2.cuda.getCudaEnabledDeviceCount()) # 0 -> integrated graphics, >0 -> GP
 
 # ec:62:60:8e:60:16
 # a6:5d:28:70:b8:e2
-bot = robotClassBluePy.INRbot("ec:62:60:8e:60:16", ["bac3","78d3","2bef"])
+# bot = robotClassBluePy.INRbot("ec:62:60:8e:60:16", ["bac3","78d3","2bef"])
+bot = robotClassBluePy.INRbot("a6:5d:28:70:b8:e2", ["bac3","78d3","2bef"])
 
 setRefAngle = False
 refAngle = 0

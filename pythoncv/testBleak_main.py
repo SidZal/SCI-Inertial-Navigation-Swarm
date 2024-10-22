@@ -45,7 +45,8 @@ cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG")) # changes codec to
 print(cv2.cuda.getCudaEnabledDeviceCount()) # 0 -> integrated graphics, >0 -> GPU-enabled
 
 # 2D array for each cart: address, service UUID, wheel Reference UUID, sensor UUID
-cartIDs = [["ec:62:60:8e:60:16", "bac3", "2bef", "78d3"]]
+# cartIDs = [["ec:62:60:8e:60:16", "bac3", "2bef", "78d3"]]
+cartIDs = [["a6:5d:28:70:b8:e2", "bac3", "2bef", "78d3"]]
 #a6:5d:28:70:b8:e2 arduino address on cart
 #f7:ae:59:0b:bf:08 arduino address on breadboard
 print(cartIDs[0])
