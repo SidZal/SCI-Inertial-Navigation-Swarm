@@ -58,6 +58,7 @@ Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
 Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 float wheelVelocity[2];
 int wheelVelocityTarget[2];
+int targetVal = 10;
 
 
 void setup() {
@@ -71,7 +72,7 @@ void setup() {
   // Set default motor tunes (PER MOTOR BASIS)
   digitalWrite(MOTOR_STANDBY, HIGH);
   kp[0]=30; ki[0]=150; kd[0]=0.3;
-  kp[1]=0; ki[1]=0; kd[1]=0;
+  kp[1]=30; ki[1]=150; kd[1]=0.3;
   motorA.tunePID(kp[0],ki[0],kd[0]);
   motorB.tunePID(kp[1],ki[1],kd[1]);
 
@@ -97,7 +98,6 @@ void loop() {
   int rest = 2000;
   int time = millis() % cycle;
   
-  int targetVal = 15;
   if(time < cycle/2 - rest) {
     wheelVelocityTarget[0] = -targetVal; // L
     wheelVelocityTarget[1] = targetVal; // R
@@ -144,9 +144,22 @@ void serialTuner() {
     if(mtr) motorB.tunePID(kp[1], ki[1], kd[1]);
     else motorA.tunePID(kp[0], ki[0], kd[0]);
   }
+  else if (userInput == "RPM") {
+    Serial.println("Previous RPM:\t" + String(targetVal));
+    Serial.print("Enter new constant RPM target: ");
+    while(Serial.available()==0);
+    targetVal = Serial.readStringUntil('\n').toInt();
+    Serial.println(targetVal);
+  }
+  else {
+    Serial.println("Menu:");
+    Serial.println("\t0\t to tune Motor A");
+    Serial.println("\t1\t to tune Motor B");
+    Serial.println("\tRPM\t to set RPM for Straight Lines");
+  }
 
   Serial.println("Continuing...");
-  delay(1000);
+  delay(4000);
   motorA.initFeedback();
   motorB.initFeedback();
 }
