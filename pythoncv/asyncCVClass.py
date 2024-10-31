@@ -36,9 +36,9 @@ class asyncCV:
     def findIndices(self, markerIDs):
         # Check for reference markers
         for i in range(len(markerIDs)):
-            if self.origin_index == -1 and markerIDs[i] == self.ORIGIN_ID:
+            if markerIDs[i] == self.ORIGIN_ID:
                 self.origin_index = i
-            elif self.reference_index == -1 and markerIDs[i] == self.REFERENCE_ID:
+            elif markerIDs[i] == self.REFERENCE_ID:
                 self.reference_index = i
 
         if self.origin_index != -1 and self.reference_index != -1:
@@ -63,7 +63,7 @@ class asyncCV:
             print(f"Scaling Factor X: {self.xFactor} cm/pixel, Y: {self.yFactor} cm/pixel")
 
             if (self.origin_index < len(markerCorners)):
-                self.refAngle = calc.get_angle(markerCorners[self.origin_index]) - np.radians(90)
+                self.refAngle = calc.get_angle(markerCorners[self.origin_index]) + np.radians(180)
                 print(f"Reference Angle: {np.degrees(self.refAngle)}°")
 
             if self.refAngle != -1: #finished final step in finding references
@@ -77,6 +77,9 @@ class asyncCV:
         else:
             return None #not sure if this is the right thing
 
+        marked_img = None
+        xCoor = yCoor = angle = -1
+
         if markerIDs is not None and not self.foundIndices:
             self.findIndices(markerIDs)
 
@@ -84,37 +87,36 @@ class asyncCV:
         if not self.foundReferences and self.foundIndices:
             self.findReferences(markerCorners)
 
-        for i in range(len(markerIDs)):
-            xCoor = yCoor = angle = -1
+        if markerIDs is not None:
+            for i in range(len(markerIDs)):
+                if self.foundReferences and markerIDs[i] not in [self.ORIGIN_ID, self.REFERENCE_ID]:
+                    mc = markerCorners[i]
 
-            if self.foundReferences and markerIDs[i] not in [self.ORIGIN_ID, self.REFERENCE_ID]:
-                mc = markerCorners[i]
+                    # Get the center of the third marker (agent)
+                    centerX = np.mean(mc[0][:, 0])
+                    centerY = np.mean(mc[0][:, 1])
 
-                # Get the center of the third marker (agent)
-                centerX = np.mean(mc[0][:, 0])
-                centerY = np.mean(mc[0][:, 1])
+                    # Find pixel difference between origin and bot, scale to cm
+                    xCoor = (centerX - self.originX) * self.xFactor
+                    yCoor = (centerY - self.originY) * self.yFactor
 
-                # Find pixel difference between origin and bot, scale to cm
-                xCoor = (centerX - self.originX) * self.xFactor
-                yCoor = (centerY - self.originY) * self.yFactor
+                    angle = calc.get_angle(markerCorners[i]) - self.refAngle
 
-                angle = calc.get_angle(markerCorners[i]) - self.refAngle
+                    #print(f"X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm, Orientation: {np.degrees(angle):.2f}°")
 
-                print(f"X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm, Orientation: {np.degrees(angle):.2f}°")
+                    # Poll for IMU data and write to CSV if received. 1/X -> max X Hz data
+                    # success, data = bot.receiveNotification(1 / 60)
+                    # if success:
+                    #     # print(data)
+                    #     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
+                    #
+                    #     timeSinceStart = time.time() - start_time
+                    #     print(f"Time: {timeSinceStart:.3f}")
+                    #     write.writerow([timeSinceStart, int(markerIDs[i]),
+                    #                             ax, ay, az, gx, gy, gz,
+                    #                             yaw, omegaL, omegaR,
+                    #                             xCoor, yCoor, angle])
 
-                # Poll for IMU data and write to CSV if received. 1/X -> max X Hz data
-                # success, data = bot.receiveNotification(1 / 60)
-                # if success:
-                #     # print(data)
-                #     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
-                #
-                #     timeSinceStart = time.time() - start_time
-                #     print(f"Time: {timeSinceStart:.3f}")
-                #     write.writerow([timeSinceStart, int(markerIDs[i]),
-                #                             ax, ay, az, gx, gy, gz,
-                #                             yaw, omegaL, omegaR,
-                #                             xCoor, yCoor, angle])
-
-        marked_img = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
+            marked_img = aruco.drawDetectedMarkers(frame, markerCorners, markerIDs)
         return marked_img, xCoor, yCoor, angle
 
