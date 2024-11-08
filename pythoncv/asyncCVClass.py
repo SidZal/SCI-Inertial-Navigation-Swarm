@@ -19,53 +19,32 @@ class asyncCV:
         self.X_DIST = x_dist
         self.Y_DIST = y_dist
 
-        self.foundReferences = False
-        self.originX = -1
-        self.originY = -1
-        self.m3x = -1
-        self.m3y = -1
-        self.refAngle = -1
-        self.xFactor = -1
-        self.yFactor = -1
+        self.originX = self.originY = self.m3x = self.m3y = None
+        self.xFactor = self.yFactor = self.refAngle = None
 
-        self.origin_index = -1
-        self.reference_index = -1
+    def findRefs(self, markerIDs, marker_corners):
+        if self.originX is None or self.m3x is None: # Check for reference markers
+            for i in range(len(markerIDs)):
+                if markerIDs[i] == self.ORIGIN_ID:
+                    self.originX = marker_corners[i][0][0][0]
+                    self.originY = marker_corners[i][0][0][1]
+                    self.refAngle = calc.get_angle(marker_corners[i])
+                    print(f"Reference Angle: {np.degrees(self.refAngle)}°")
+                elif markerIDs[i] == self.REFERENCE_ID:
+                    self.m3x = marker_corners[i][0][0][0]
+                    self.m3y = marker_corners[i][0][0][1]
 
-    #only called if origin index or ref index are -1. finds indices of origin and reference markers
-    def findIndices(self, markerIDs):
-        self.origin_index = self.reference_index = -1
+            if self.originX is not None and self.m3x is not None:
+                dist_x = self.m3x - self.originX
+                dist_y = self.m3y - self.originY
 
-        # Check for reference markers
-        for i in range(len(markerIDs)):
-            if markerIDs[i] == self.ORIGIN_ID:
-                self.origin_index = i
-            elif markerIDs[i] == self.REFERENCE_ID:
-                self.reference_index = i
+                self.xFactor = self.X_DIST / dist_x
+                self.yFactor = self.Y_DIST / dist_y
+                print(f"Scaling Factor X: {self.xFactor} cm/pixel, Y: {self.yFactor} cm/pixel")
+        else:
+            return True
 
-        # Only return true if both references are found and indexed
-        return self.origin_index != -1 and self.reference_index != -1
-
-    #finds origin coordinaates, scaling factors, reference angle. maybe split up?
-    def findReferences(self, marker_corners):
-        if self.origin_index < len(marker_corners):
-            self.originX = marker_corners[self.origin_index][0][0][0]
-            self.originY = marker_corners[self.origin_index][0][0][1]
-        if self.reference_index < len(marker_corners):
-            self.m3x = marker_corners[self.reference_index][0][0][0]
-            self.m3y = marker_corners[self.reference_index][0][0][1]
-
-        dist_x = self.m3x - self.originX
-        dist_y = self.m3y - self.originY
-        print(f"{dist_x} {dist_y}")
-        if dist_x != 0 and dist_y != 0:
-            self.xFactor = self.X_DIST / dist_x
-            self.yFactor = self.Y_DIST / dist_y
-            print(f"Scaling Factor X: {self.xFactor} cm/pixel, Y: {self.yFactor} cm/pixel")
-
-            self.refAngle = calc.get_angle(marker_corners[self.origin_index])
-            print(f"Reference Angle: {np.degrees(self.refAngle)}°")
-
-            self.foundReferences = True
+        return False
 
     def detect(self):
         success, frame = self.cap.read()
@@ -75,7 +54,7 @@ class asyncCV:
             marker_corners, marker_ids, _ = self.detector.detectMarkers(frame)
 
             if marker_ids is not None:
-                if self.foundReferences:
+                if self.findRefs(marker_ids, marker_corners):
                     for i in range(len(marker_ids)):
                         if marker_ids[i] not in [self.ORIGIN_ID, self.REFERENCE_ID]:
                             mc = marker_corners[i]
@@ -90,11 +69,6 @@ class asyncCV:
                             angle = calc.get_angle(marker_corners[i]) + self.refAngle
 
                             # print(f"X: {xCoor:.2f} cm, Y: {yCoor:.2f} cm, Orientation: {np.degrees(angle):.2f}°")
-                elif self.findIndices(marker_ids):
-                    self.findReferences(marker_corners)
-                else:
-                    # This will be run before reference is defined and the CV is searching for the reference markers
-                    pass
 
             marked_img = aruco.drawDetectedMarkers(frame, marker_corners, marker_ids)
         return marked_img, xCoor, yCoor, angle
