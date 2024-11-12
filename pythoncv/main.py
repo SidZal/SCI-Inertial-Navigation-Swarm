@@ -10,6 +10,7 @@ from bleak import BleakClient
 import struct
 from pyquaternion import Quaternion
 import os
+import json
 
 # Width/Height dictates window size and resolution OpenCV will analyze
 WINDOW_WIDTH = 700
@@ -25,12 +26,13 @@ REFERENCE_ID = 0
 timestr = time.strftime("%Y%m%d%H%M%S")
 DIR = f"../.tliodata/{timestr}"
 os.makedirs(DIR)
+TEST_LIST = open(f"../.tliodata/test_list.txt", 'a')
 
 IMU_FILE_PATH = f"../.tliodata/{timestr}/imu_samples_0.csv"
 CV_FILE_PATH = f"../.tliodata/{timestr}/imu0_resampled.npy"
 
 IMU_FILE = csv.writer(open(IMU_FILE_PATH, 'w'))
-CV_FILE = open(CV_FILE_PATH, 'ab')
+CV_FILE = open(CV_FILE_PATH, 'wb')
 
 # Load camera
 cap = cv2.VideoCapture(0)
@@ -43,6 +45,7 @@ print(cap.get(cv2.CAP_PROP_FPS))
 DICT_USED = aruco.DICT_6X6_50
 
 startTime = 0
+cv_data = []
 
 
 
@@ -63,9 +66,8 @@ async def sensor_notification(cartUUID, data):
     clock = time.perf_counter_ns() - startTime
     data = np.array(list(struct.iter_unpack('f', data)), dtype=float).flatten()
     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
-    IMU_FILE.writerow([clock, 0,
-                    ax, -ay, -az, gx, -gy, -gz])  # negating y and z axis due to IMU orientation
-    #print(f"IMU: {clock/1e9}")
+    IMU_FILE.writerow([clock, 0, gx, -gy, -gz, ax, -ay, -az])  # negating y and z axis due to IMU orientation
+    print(f"IMU: {clock/1e9}")
 
 
 async def bluetooth_loop():
@@ -73,15 +75,13 @@ async def bluetooth_loop():
     async with BleakClient(cart1.address) as client:
         print("Connected")
         await client.start_notify(cart1.sensor, sensor_notification)
+
         global startTime
         startTime = time.perf_counter_ns()
+
         await camera_loop()
-        # client = BleakClient(cart1.address)
-        # await client.connect()
-        #await client.start_notify(cart1.sensor, sensor_notification)
-        # await asyncio.sleep(300)
+
         await client.stop_notify(cart1.sensor)
-        # await client.disconnect()
 
 
 async def camera_loop():
@@ -108,18 +108,43 @@ async def camera_loop():
                     xVel = (xCoor - old_x) / dt
                     yVel = (yCoor - old_y) / dt
 
-                # TODO: save does not append like expected... might need external library
-                np.save(CV_FILE, [[cam_clock /1e3, 0,0,0, 0,0,0,
+                cv_data.append([cam_clock /1e3, 0,0,0, 0,0,0,
                                   cv_quat[1], cv_quat[2], cv_quat[3], cv_quat[0],
-                                  xCoor, yCoor, 0,
-                                  xVel, yVel, 0]])
-                #print(f"Cam: {camClock/1e9}")
+                                  xCoor/100, yCoor/100, 0,
+                                  xVel, yVel, 0])
+                print(f"Cam: {cam_clock/1e9}")
 
         await asyncio.sleep(1/60)
 
         if cv2.pollKey() & 0xFF == ord('q'):
             break
+
     cv2.destroyAllWindows()
     cap.release()
 
 asyncio.run(bluetooth_loop())
+
+# Save data for TLIO
+np.save(CV_FILE, cv_data)
+TEST_LIST.write(timestr + '\n')
+
+camJSON = {
+    "columns_name(width)": [
+        "ts_us(1)",
+        "gyr_compensated_rotated_in_World(3)",
+        "acc_compensated_rotated_in_World(3)",
+        "qxyzw_World_Device(4)",
+        "pos_World_Device(3)",
+        "vel_World(3)"
+    ],
+    "num_rows": len(cv_data),
+    "approximate_frequency_hz": 30.0,
+    "t_start_us": cv_data[0][0],
+    "t_end_us": cv_data[-1][0]
+}
+camJSONFile = open(f"../.tliodata/{timestr}/imu0_resampled_description.json", 'w')
+json.dump(camJSON, camJSONFile, indent=4)
+
+camJSONFile.close()
+CV_FILE.close()
+TEST_LIST.close()
