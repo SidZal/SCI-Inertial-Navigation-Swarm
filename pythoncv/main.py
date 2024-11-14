@@ -11,6 +11,7 @@ import struct
 from pyquaternion import Quaternion
 import os
 import json
+import randompath
 
 # Width/Height dictates window size and resolution OpenCV will analyze
 WINDOW_WIDTH = 700
@@ -53,21 +54,24 @@ cv_data = []
 # a6:5d:28:70:b8:e2 33 BLE on white cart
 cartIDs = [["a6:5d:28:70:b8:e2", "bac3", "2bef", "78d3"]]
 cart1 = Cart(cartIDs[0])
+bot = randompath.botPath(cart1)
 
 aCV = asyncCVClass.asyncCV(cap, DICT_USED, ORIGIN_ID, REFERENCE_ID, X_DIST, Y_DIST)
 
 xCoor = yCoor = angle = 0
 
-def wheel_ref_to_bytes(omega_left, omega_right):
-    return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
+# def wheel_ref_to_bytes(omega_left, omega_right):
+#     return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
 
 
 async def sensor_notification(cartUUID, data):
     clock = time.perf_counter_ns() - startTime
     data = np.array(list(struct.iter_unpack('f', data)), dtype=float).flatten()
     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
-    IMU_FILE.writerow([clock, 0, gx, -gy, -gz, ax, -ay, -az])  # negating y and z axis due to IMU orientation
+    IMU_FILE.writerow([clock, 0, gx, gz, gy, ax, az, ay])  # negating y and z axis due to IMU orientation
     print(f"IMU: {clock/1e9}")
+    print(f"xCoor: {xCoor}")
+
 
 
 async def bluetooth_loop():
@@ -79,16 +83,21 @@ async def bluetooth_loop():
         global startTime
         startTime = time.perf_counter_ns()
 
+        await bot.takePath(client)
+        #await cart1.set_wheel_speed(10, -10, client)
         await camera_loop()
 
         await client.stop_notify(cart1.sensor)
 
 
 async def camera_loop():
-    xCoor = yCoor = 0
+    #xCoor = yCoor = 0
     cam_clock = time.perf_counter_ns()
 
     while True:
+        global xCoor
+        global yCoor
+
         old_x = xCoor
         old_y = yCoor
         marked_img, xCoor, yCoor, angle = aCV.detect()

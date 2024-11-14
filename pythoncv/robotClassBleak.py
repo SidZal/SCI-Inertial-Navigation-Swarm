@@ -12,6 +12,14 @@ class Cart:
         self.wheel_reference = IDs[2]
         self.sensor = IDs[3]
 
+    def wheel_ref_to_bytes(self, omega_left, omega_right):
+        return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
+
+    async def set_wheel_speed(self, omega_left, omega_right, client):
+        omega_byte_array = self.wheel_ref_to_bytes(omega_left, omega_right)
+        print("here")
+        await client.write_gatt_char(self.wheel_reference, omega_byte_array)
+
 # class below DOES NOT work
 class INRBot:
     def __init__(self, address, uuids):
