@@ -17,7 +17,6 @@ class Cart:
 
     async def set_wheel_speed(self, omega_left, omega_right, client):
         omega_byte_array = self.wheel_ref_to_bytes(omega_left, omega_right)
-        print("here")
         await client.write_gatt_char(self.wheel_reference, omega_byte_array)
 
 # class below DOES NOT work

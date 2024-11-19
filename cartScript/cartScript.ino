@@ -58,7 +58,7 @@ Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
 Motor motorB(in3, in4, PWMB, C1B, C2B, conversionRatio);
 float wheelVelocity[2];
 int wheelVelocityTarget[2];
-int targetVal = 10;
+int targetVal = 0;
 
 
 void setup() {
@@ -78,6 +78,9 @@ void setup() {
 
   setupIMU();
   setupBLE();
+
+  motorA.initFeedback();
+  motorB.initFeedback();
 }
 
 void loop() {
@@ -90,39 +93,39 @@ void loop() {
   // }
   // sensorReadings.writeValue(noise, 36);
 
-  if (Serial.available() > 0)
-    serialTuner();
+  // if (Serial.available() > 0)
+  //   serialTuner();
 
   // TEMP: On-board Predetermined Control
-  int cycle = 10000;
-  int rest = 2000;
-  int time = millis() % cycle;
+  // int cycle = 34000;
+  // int rest = 2000;
+  // int time = millis() % cycle;
   
-  if(time < cycle/2 - rest) {
-    wheelVelocityTarget[0] = -targetVal; // L
-    wheelVelocityTarget[1] = targetVal; // R
-  }
-  else if (time < cycle/2){
-    wheelVelocityTarget[0] = 0; // L
-    wheelVelocityTarget[1] = 0; // R
-  }
-  else if (time < cycle-rest){
-    wheelVelocityTarget[0] = targetVal; // L
-    wheelVelocityTarget[1] = -targetVal; // R
-  }
-  else {
-    wheelVelocityTarget[0] = 0; // L
-    wheelVelocityTarget[1] = 0; // R
-  }
+  // if(time < cycle/2 - rest) {
+  //   wheelVelocityTarget[0] = -targetVal; // L
+  //   wheelVelocityTarget[1] = targetVal; // R
+  // }
+  // else if (time < cycle/2){
+  //   wheelVelocityTarget[0] = 0; // L
+  //   wheelVelocityTarget[1] = 0; // R
+  // }
+  // else if (time < cycle-rest){
+  //   wheelVelocityTarget[0] = targetVal; // L
+  //   wheelVelocityTarget[1] = -targetVal; // R
+  // }
+  // else {
+  //   wheelVelocityTarget[0] = 0; // L
+  //   wheelVelocityTarget[1] = 0; // R
+  // }
   
-  // motorA.drive(wheelVelocityTarget[0]);
-  // motorB.drive(wheelVelocityTarget[1]);
+  //motorA.drive(wheelVelocityTarget[0]);
+  //  motorB.drive(wheelVelocityTarget[1]);
 
-  // Motor control
-  wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
-  wheelVelocity[1] = motorB.feedbackStep(wheelVelocityTarget[1]);
+  // // Motor control
+  // wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
+  // wheelVelocity[1] = motorB.feedbackStep(wheelVelocityTarget[1]);
 
-  Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"35  -35");
+  // Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"35  -35");
 
   readIMU();
 }
@@ -226,10 +229,12 @@ void setupIMU() {
   devStatus = mpu.dmpInitialize();
 
   // supply your own gyro offsets here, scaled for min sensitivity
-  mpu.setXGyroOffset(220);
-  mpu.setYGyroOffset(76);
-  mpu.setZGyroOffset(-85);
-  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+  mpu.setXGyroOffset(96);
+  mpu.setYGyroOffset(-12);
+  mpu.setZGyroOffset(-7);
+  mpu.setXAccelOffset(-668);
+  mpu.setYAccelOffset(-3272);
+  mpu.setZAccelOffset(1396);
 
   // make sure it worked (returns 0 if so)
   if (devStatus == 0) {
@@ -276,8 +281,8 @@ void readIMU() {
     
     // Serial.print(String(q.w) + ' ' + String(q.x) + ' ' + String(q.y) + ' ' + String(q.z) + ' ');
     // Serial.print(String(quatsypr[4]) + ' ' + String(quatsypr[5]) + ' ' + String(quatsypr[6]) + ' ');
-    // Serial.print(String(motion6[0]) + ' ' + String(motion6[1]) + ' ' + String(motion6[2]) + ' ');
-    // Serial.println(String(motion6[3]) + ' ' + String(motion6[4]) + ' ' + String(motion6[5]));
+    // Serial.println(String(motion6[0]) + '\t' + String(motion6[1]) + '\t' + String(motion6[2]) + '\t' 
+    //         + String(motion6[3]) + '\t' + String(motion6[4]) + '\t' + String(motion6[5]));
   }
 }
 
@@ -293,8 +298,10 @@ void cartDisconnected(BLEDevice dev) {
 void wheelHandler(BLEDevice dev, BLECharacteristic characteristic) {
   int omega[2];
   wheelRef.readValue(&omega, 8);
-  Serial.println(String(omega[0]) + " " + String(omega[1]));
-}
+  motorA.feedbackStep(omega[0]);
+  motorB.feedbackStep(omega[1]);
+  Serial.println(String(omega[0]) + " "+ String(omega[1]));
+} 
 
 
 // Motor Interrupts from Encoders

@@ -1,4 +1,6 @@
 import csv
+
+import bleak
 import cv2
 import cv2.aruco as aruco
 import time
@@ -33,7 +35,8 @@ IMU_FILE_PATH = f"../.tliodata/{timestr}/imu_samples_0.csv"
 CV_FILE_PATH = f"../.tliodata/{timestr}/imu0_resampled.npy"
 
 IMU_FILE = csv.writer(open(IMU_FILE_PATH, 'w'))
-CV_FILE = open(CV_FILE_PATH, 'wb')
+# IMU_FILE.writerow("#timestamp [ns], temperature [degC], w_RS_S_x [rad s^-1], w_RS_S_y [rad s^-1], w_RS_S_z [rad s^-1], a_RS_S_x [m s^-2], a_RS_S_y [m s^-2], a_RS_S_z [m s^-2]")
+CV_FILE = open(CV_FILE_PATH, 'ab')
 
 # Load camera
 cap = cv2.VideoCapture(0)
@@ -70,7 +73,6 @@ async def sensor_notification(cartUUID, data):
     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
     IMU_FILE.writerow([clock, 0, gx, gz, gy, ax, az, ay])  # negating y and z axis due to IMU orientation
     print(f"IMU: {clock/1e9}")
-    print(f"xCoor: {xCoor}")
 
 
 
@@ -83,9 +85,7 @@ async def bluetooth_loop():
         global startTime
         startTime = time.perf_counter_ns()
 
-        await bot.takePath(client)
-        #await cart1.set_wheel_speed(10, -10, client)
-        await camera_loop()
+        await asyncio.gather(bot.takePath(client), camera_loop())
 
         await client.stop_notify(cart1.sensor)
 
@@ -131,7 +131,12 @@ async def camera_loop():
     cv2.destroyAllWindows()
     cap.release()
 
-asyncio.run(bluetooth_loop())
+#asyncio.run(bluetooth_loop())
+loop = asyncio.get_event_loop()
+try:
+    loop.run_until_complete(bluetooth_loop())
+except bleak.BleakError: #right now can only stop arduiino by unplugging, so handling exception for that
+    loop.close()
 
 # Save data for TLIO
 np.save(CV_FILE, cv_data)
