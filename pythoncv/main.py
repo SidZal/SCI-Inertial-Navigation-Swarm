@@ -29,7 +29,7 @@ REFERENCE_ID = 0
 timestr = time.strftime("%Y%m%d%H%M%S")
 DIR = f"../.tliodata/{timestr}"
 os.makedirs(DIR)
-TEST_LIST = open(f"../.tliodata/test_list.txt", 'a')
+TRAIN_LIST = open(f"../.tliodata/train_list.txt", 'a')
 
 IMU_FILE_PATH = f"../.tliodata/{timestr}/imu_samples_0.csv"
 CV_FILE_PATH = f"../.tliodata/{timestr}/imu0_resampled.npy"
@@ -51,8 +51,6 @@ DICT_USED = aruco.DICT_6X6_50
 startTime = 0
 cv_data = []
 
-
-
 # ec:62:60:8e:60:16 RP2040 on black cart
 # a6:5d:28:70:b8:e2 33 BLE on white cart
 cartIDs = [["a6:5d:28:70:b8:e2", "bac3", "2bef", "78d3"]]
@@ -61,18 +59,21 @@ bot = randompath.botPath(cart1)
 
 aCV = asyncCVClass.asyncCV(cap, DICT_USED, ORIGIN_ID, REFERENCE_ID, X_DIST, Y_DIST)
 
-xCoor = yCoor = angle = 0
 
-# def wheel_ref_to_bytes(omega_left, omega_right):
-#     return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
+class sharedCoords:
+    def __init__(self):
+        self.xCoor = 0
+        self.yCoor = 0
 
+angle = 0
+coords = sharedCoords()
 
 async def sensor_notification(cartUUID, data):
     clock = time.perf_counter_ns() - startTime
     data = np.array(list(struct.iter_unpack('f', data)), dtype=float).flatten()
     ax, ay, az, gx, gy, gz, yaw, omegaL, omegaR = data
     IMU_FILE.writerow([clock, 0, gx, gz, gy, ax, az, ay])  # negating y and z axis due to IMU orientation
-    print(f"IMU: {clock/1e9}")
+    # print(f"IMU: {clock/1e9}")
 
 
 
@@ -84,27 +85,43 @@ async def bluetooth_loop():
 
         global startTime
         startTime = time.perf_counter_ns()
+        tasks = [bot.takePath(client, coords), camera_loop()]
 
-        await asyncio.gather(bot.takePath(client), camera_loop())
+        task_objects = [asyncio.create_task(t) for t in tasks]
+
+        # Wait for the first task to complete
+        done, pending = await asyncio.wait(task_objects, return_when=asyncio.FIRST_COMPLETED)
+
+        # Handle the result of the completed task
+
+        # Cancel remaining tasks
+        for pending_task in pending:
+            pending_task.cancel()
+            try:
+                await pending_task
+            except asyncio.CancelledError:
+                print("A pending task was cancelled.")
 
         await client.stop_notify(cart1.sensor)
 
 
 async def camera_loop():
-    #xCoor = yCoor = 0
     cam_clock = time.perf_counter_ns()
 
     while True:
-        global xCoor
-        global yCoor
+        # global xCoor
+        # global yCoor
 
-        old_x = xCoor
-        old_y = yCoor
+        old_x = coords.xCoor
+        old_y = coords.yCoor
         marked_img, xCoor, yCoor, angle = aCV.detect()
+        print(f"x {xCoor} y {yCoor}")
 
         if marked_img is not None:
             cv2.imshow('cam', marked_img)
             if xCoor is not None:
+                coords.xCoor = xCoor
+                coords.yCoor = yCoor
                 old_clock = cam_clock
                 cam_clock = time.perf_counter_ns() - startTime
 
@@ -114,12 +131,12 @@ async def camera_loop():
                 if old_x is None:
                     xVel = yVel = 0
                 else:
-                    xVel = (xCoor - old_x) / dt
-                    yVel = (yCoor - old_y) / dt
+                    xVel = (coords.xCoor - old_x) / dt
+                    yVel = (coords.yCoor - old_y) / dt
 
-                cv_data.append([cam_clock /1e3, 0,0,0, 0,0,0,
+                cv_data.append([cam_clock / 1e3, 0,0,0, 0,0,0,
                                   cv_quat[1], cv_quat[2], cv_quat[3], cv_quat[0],
-                                  xCoor/100, yCoor/100, 0,
+                                  coords.xCoor/100, coords.yCoor/100, 0,
                                   xVel, yVel, 0])
                 print(f"Cam: {cam_clock/1e9}")
 
@@ -131,34 +148,30 @@ async def camera_loop():
     cv2.destroyAllWindows()
     cap.release()
 
-#asyncio.run(bluetooth_loop())
-loop = asyncio.get_event_loop()
-try:
-    loop.run_until_complete(bluetooth_loop())
-except bleak.BleakError: #right now can only stop arduiino by unplugging, so handling exception for that
-    loop.close()
+asyncio.run(bluetooth_loop())
 
 # Save data for TLIO
 np.save(CV_FILE, cv_data)
-TEST_LIST.write(timestr + '\n')
+TRAIN_LIST.write(timestr + '\n')
 
-camJSON = {
-    "columns_name(width)": [
-        "ts_us(1)",
-        "gyr_compensated_rotated_in_World(3)",
-        "acc_compensated_rotated_in_World(3)",
-        "qxyzw_World_Device(4)",
-        "pos_World_Device(3)",
-        "vel_World(3)"
-    ],
-    "num_rows": len(cv_data),
-    "approximate_frequency_hz": 30.0,
-    "t_start_us": cv_data[0][0],
-    "t_end_us": cv_data[-1][0]
-}
-camJSONFile = open(f"../.tliodata/{timestr}/imu0_resampled_description.json", 'w')
-json.dump(camJSON, camJSONFile, indent=4)
+if len(cv_data) > 0:
+    camJSON = {
+        "columns_name(width)": [
+            "ts_us(1)",
+            "gyr_compensated_rotated_in_World(3)",
+            "acc_compensated_rotated_in_World(3)",
+            "qxyzw_World_Device(4)",
+            "pos_World_Device(3)",
+            "vel_World(3)"
+        ],
+        "num_rows": len(cv_data),
+        "approximate_frequency_hz": 30.0,
+        "t_start_us": cv_data[0][0],
+        "t_end_us": cv_data[-1][0]
+    }
+    camJSONFile = open(f"../.tliodata/{timestr}/imu0_resampled_description.json", 'w')
+    json.dump(camJSON, camJSONFile, indent=4)
 
-camJSONFile.close()
+    camJSONFile.close()
 CV_FILE.close()
-TEST_LIST.close()
+TRAIN_LIST.close()

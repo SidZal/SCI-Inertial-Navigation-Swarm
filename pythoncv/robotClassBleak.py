@@ -16,10 +16,10 @@ class Cart:
         return omega_left.to_bytes(4, 'little', signed=True) + omega_right.to_bytes(4, 'little', signed=True)
 
     async def set_wheel_speed(self, omega_left, omega_right, client):
+        print("write attempt")
         omega_byte_array = self.wheel_ref_to_bytes(omega_left, omega_right)
         await client.write_gatt_char(self.wheel_reference, omega_byte_array)
 
-# class below DOES NOT work
 class INRBot:
     def __init__(self, address, uuids):
         # Initialize device at address and connect

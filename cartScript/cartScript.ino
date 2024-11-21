@@ -87,16 +87,10 @@ void loop() {
   // Poll: waits for BLE events (connection/disconnection/write)
   BLE.poll();
 
-  // float noise[9];
-  // for (int i=0; i<9; i++) {
-  //   noise[i] = (float) (10*random());
-  // }
-  // sensorReadings.writeValue(noise, 36);
+  //if (Serial.available() > 0)
+    //serialTuner();
 
-  // if (Serial.available() > 0)
-  //   serialTuner();
-
-  // TEMP: On-board Predetermined Control
+  // // TEMP: On-board Predetermined Control
   // int cycle = 34000;
   // int rest = 2000;
   // int time = millis() % cycle;
@@ -117,15 +111,12 @@ void loop() {
   //   wheelVelocityTarget[0] = 0; // L
   //   wheelVelocityTarget[1] = 0; // R
   // }
-  
-  //motorA.drive(wheelVelocityTarget[0]);
-  //  motorB.drive(wheelVelocityTarget[1]);
 
-  // // Motor control
-  // wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
-  // wheelVelocity[1] = motorB.feedbackStep(wheelVelocityTarget[1]);
+  //Motor control
+  wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
+  wheelVelocity[1] = motorB.feedbackStep(wheelVelocityTarget[1]);
 
-  // Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"35  -35");
+  //Serial.println(String(wheelVelocityTarget[0])+'\t'+String(wheelVelocity[0])+'\t'+String(wheelVelocityTarget[1])+'\t'+ String(wheelVelocity[1])+'\t'+"35  -35");
 
   readIMU();
 }
@@ -291,16 +282,24 @@ void cartConnected(BLEDevice dev) {
   Serial.println("Connected to " + dev.address());
   digitalWrite(ledPin, HIGH);  
 }
+
 void cartDisconnected(BLEDevice dev) {
   Serial.println("Disconnected from " + dev.address());
+
+  wheelVelocityTarget[0] = 0;
+  wheelVelocityTarget[1] = 0;
+
   digitalWrite(ledPin, LOW);  
 }
+
 void wheelHandler(BLEDevice dev, BLECharacteristic characteristic) {
+  Serial.println("hello here");
   int omega[2];
   wheelRef.readValue(&omega, 8);
-  motorA.feedbackStep(omega[0]);
-  motorB.feedbackStep(omega[1]);
-  Serial.println(String(omega[0]) + " "+ String(omega[1]));
+  wheelVelocityTarget[0] = omega[0];
+  wheelVelocityTarget[1] = omega[1];
+  
+  Serial.println(String(omega[0]) + " " + String(omega[1]));
 } 
 
 
