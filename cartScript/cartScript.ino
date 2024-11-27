@@ -10,11 +10,7 @@
 #include "Motor.h"
 
 // IMU Libraries
-#include "MPU6050_6Axis_MotionApps20.h"
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-    #include "Wire.h"
-#endif
-
+#include "MPU6050_6Axis_MotionApps612.h"
 
 // On-Board BLE Service
 BLEService cartData("bac3");
@@ -26,17 +22,18 @@ const int ledPin = LED_BUILTIN; // pin to use for the LED
 MPU6050 mpu;
 uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
 uint8_t fifoBuffer[64]; // FIFO storage buffer
+uint16_t packetSize;    // Expected DMP packet size (default is 42 bytes)
+
 Quaternion q;
 VectorFloat gravity;
 float quatsypr[7];
 float orientation[3];
 int16_t motion6[6];
 
-
 // Motor Pins
 #define PWMA 6
-#define in1 7
-#define in2 8
+#define in1 8
+#define in2 7
 #define C1A 3
 #define C2A 5
 
@@ -51,7 +48,7 @@ int16_t motion6[6];
 // Low-Level Speed Control Parameters
 #define MAX_RPM 30
 const float countsPerRotation = 3;
-const float gearRatio = 1000;
+const float gearRatio = 298;
 const float conversionRatio = 1./countsPerRotation*60/gearRatio;
 float kp[2],ki[2],kd[2];
 Motor motorA(in1, in2, PWMA, C1A, C2A, conversionRatio);
@@ -63,7 +60,7 @@ int targetVal = 0;
 
 void setup() {
   Serial.begin(115200);
-  while(!Serial);
+  //while(!Serial);
 
   // Motor setup: interrupts for encoders, standby turns on motor controller
   attachInterrupt(digitalPinToInterrupt(C1A), motorAInterrupt, RISING);
@@ -71,8 +68,10 @@ void setup() {
 
   // Set default motor tunes (PER MOTOR BASIS)
   digitalWrite(MOTOR_STANDBY, HIGH);
-  kp[0]=30; ki[0]=150; kd[0]=0.3;
-  kp[1]=30; ki[1]=150; kd[1]=0.3;
+  // 6V 30 150 .3
+  // ??? 8 40 .1
+  kp[0]=8; ki[0]=40; kd[0]=0.1;
+  kp[1]=8; ki[1]=40; kd[1]=0.1;
   motorA.tunePID(kp[0],ki[0],kd[0]);
   motorB.tunePID(kp[1],ki[1],kd[1]);
 
@@ -87,30 +86,8 @@ void loop() {
   // Poll: waits for BLE events (connection/disconnection/write)
   BLE.poll();
 
-  //if (Serial.available() > 0)
-    //serialTuner();
-
-  // // TEMP: On-board Predetermined Control
-  // int cycle = 34000;
-  // int rest = 2000;
-  // int time = millis() % cycle;
-  
-  // if(time < cycle/2 - rest) {
-  //   wheelVelocityTarget[0] = -targetVal; // L
-  //   wheelVelocityTarget[1] = targetVal; // R
-  // }
-  // else if (time < cycle/2){
-  //   wheelVelocityTarget[0] = 0; // L
-  //   wheelVelocityTarget[1] = 0; // R
-  // }
-  // else if (time < cycle-rest){
-  //   wheelVelocityTarget[0] = targetVal; // L
-  //   wheelVelocityTarget[1] = -targetVal; // R
-  // }
-  // else {
-  //   wheelVelocityTarget[0] = 0; // L
-  //   wheelVelocityTarget[1] = 0; // R
-  // }
+  if (Serial.available() > 0)
+    serialTuner();
 
   //Motor control
   wheelVelocity[0] = motorA.feedbackStep(wheelVelocityTarget[0]);
@@ -201,10 +178,10 @@ void setupBLE() {
 void setupIMU() {
   // join I2C bus (I2Cdev library doesn't do this automatically)
   #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-      Wire.begin();
-      Wire.setClock(400000);
+    Wire.begin();
+    Wire.setClock(400000);
   #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
-      Fastwire::setup(400, true);
+    Fastwire::setup(400, true);
   #endif
 
   // initialize device
@@ -229,21 +206,25 @@ void setupIMU() {
 
   // make sure it worked (returns 0 if so)
   if (devStatus == 0) {
-      // Calibration Time: generate offsets and calibrate our MPU6050
-      mpu.CalibrateAccel(6);
-      mpu.CalibrateGyro(6);
-      mpu.PrintActiveOffsets();
-      // turn on the DMP, now that it's ready
-      Serial.println(F("Enabling DMP..."));
-      mpu.setDMPEnabled(true);
+    // Calibration Time: generate offsets and calibrate our MPU6050
+    mpu.CalibrateAccel(6);
+    mpu.CalibrateGyro(6);
+    mpu.PrintActiveOffsets();
+    // turn on the DMP, now that it's ready
+    Serial.println(F("Enabling DMP..."));
+    mpu.setDMPEnabled(true);
+
+    Serial.println(F("DMP ready! Waiting for first interrupt..."));
+    packetSize = mpu.dmpGetFIFOPacketSize(); //Get expected DMP packet size for later comparison
+
   } else {
-      // ERROR!
-      // 1 = initial memory load failed
-      // 2 = DMP configuration updates failed
-      // (if it's going to break, usually the code will be 1)
-      Serial.print(F("DMP Initialization failed (code "));
-      Serial.print(devStatus);
-      Serial.println(F(")"));
+    // ERROR!
+    // 1 = initial memory load failed
+    // 2 = DMP configuration updates failed
+    // (if it's going to break, usually the code will be 1)
+    Serial.print(F("DMP Initialization failed (code "));
+    Serial.print(devStatus);
+    Serial.println(F(")"));
   }
 }
 
@@ -254,7 +235,6 @@ void readIMU() {
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(quatsypr+4, &q, &gravity);
-
     mpu.getMotion6(motion6, motion6+1, motion6+2, motion6+3, motion6+4, motion6+5);
 
     float robotData[9];
@@ -267,13 +247,13 @@ void readIMU() {
     robotData[7] = wheelVelocity[0];
     robotData[8] = wheelVelocity[1];
 
-    //quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
+    quatsypr[0] = q.w; quatsypr[1] = q.x; quatsypr[2] = q.y; quatsypr[3] = q.z;
     sensorReadings.writeValue(&robotData, 36);
     
     // Serial.print(String(q.w) + ' ' + String(q.x) + ' ' + String(q.y) + ' ' + String(q.z) + ' ');
     // Serial.print(String(quatsypr[4]) + ' ' + String(quatsypr[5]) + ' ' + String(quatsypr[6]) + ' ');
-    // Serial.println(String(motion6[0]) + '\t' + String(motion6[1]) + '\t' + String(motion6[2]) + '\t' 
-    //         + String(motion6[3]) + '\t' + String(motion6[4]) + '\t' + String(motion6[5]));
+    Serial.println(String(motion6[0]) + '\t' + String(motion6[1]) + '\t' + String(motion6[2]) + '\t' 
+            + String(motion6[3]) + '\t' + String(motion6[4]) + '\t' + String(motion6[5]));
   }
 }
 
@@ -293,7 +273,6 @@ void cartDisconnected(BLEDevice dev) {
 }
 
 void wheelHandler(BLEDevice dev, BLECharacteristic characteristic) {
-  Serial.println("hello here");
   int omega[2];
   wheelRef.readValue(&omega, 8);
   wheelVelocityTarget[0] = omega[0];
